@@ -1,0 +1,64 @@
+{
+  "name": "@bitofsky/databricks-sql",
+  "version": "1.0.0",
+  "description": "Databricks SQL client for Node.js - Direct REST API without SDK",
+  "main": "dist/index.cjs",
+  "module": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:tsc": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "prepublishOnly": "npm run build:tsc && npm run build"
+  },
+  "keywords": [
+    "databricks",
+    "sql",
+    "rest-api",
+    "streaming",
+    "arrow",
+    "apache-arrow"
+  ],
+  "author": "BumSeok Hwang <bitofsky@naver.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/bitofsky/databricks-sql.git"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@bitofsky/merge-streams": "1.1.0",
+    "stream-json": "1.9.1"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-s3": "3.958.0",
+    "@aws-sdk/s3-request-presigner": "3.958.0",
+    "@types/node": "24.0.2",
+    "@types/stream-json": "1.7.8",
+    "dotenv": "17.2.3",
+    "tsup": "8.5.1",
+    "typescript": "5.9.3",
+    "vitest": "4.0.16"
+  }
+}
