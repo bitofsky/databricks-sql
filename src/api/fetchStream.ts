@@ -1,12 +1,16 @@
+import type { MergeFormat } from '@bitofsky/merge-streams'
 import type {
   AuthInfo,
   ExternalLinkInfo,
-  StatementResult,
   FetchStreamOptions,
   StatementManifest,
+  StatementResult,
 } from '../types.js'
+
 import { PassThrough, Readable } from 'node:stream'
-import { mergeStreamsFromUrls, type MergeFormat } from '@bitofsky/merge-streams'
+
+import { mergeStreamsFromUrls } from '@bitofsky/merge-streams'
+
 import { getChunk } from '../databricks-api.js'
 import { AbortError, DatabricksSqlError } from '../errors.js'
 import { pipeUrlToOutput, validateSucceededResult } from '../util.js'

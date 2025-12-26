@@ -28,6 +28,85 @@ export type StatementStatus = {
   }
 }
 
+/**
+ * Query execution metrics from Query History API
+ * @see https://docs.databricks.com/api/workspace/queryhistory/list
+ */
+export type QueryMetrics = {
+  /** Total time in milliseconds */
+  total_time_ms?: number
+  /** Compilation time in milliseconds */
+  compilation_time_ms?: number
+  /** Execution time in milliseconds */
+  execution_time_ms?: number
+  /** Result fetch time in milliseconds */
+  result_fetch_time_ms?: number
+  /** Query execution time in milliseconds */
+  query_execution_time_ms?: number
+  /** Metadata time in milliseconds */
+  metadata_time_ms?: number
+  /** Task total time in milliseconds */
+  task_total_time_ms?: number
+  /** Photon total time in milliseconds */
+  photon_total_time_ms?: number
+  /** Query compilation start timestamp */
+  query_compilation_start_timestamp?: number
+  /** Bytes read */
+  read_bytes?: number
+  /** Remote bytes read */
+  read_remote_bytes?: number
+  /** Remote bytes written */
+  write_remote_bytes?: number
+  /** Cache bytes read */
+  read_cache_bytes?: number
+  /** Bytes spilled to disk */
+  spill_to_disk_bytes?: number
+  /** Network bytes sent */
+  network_sent_bytes?: number
+  /** Pruned bytes */
+  pruned_bytes?: number
+  /** Rows produced count */
+  rows_produced_count?: number
+  /** Rows read count */
+  rows_read_count?: number
+  /** Files read count */
+  read_files_count?: number
+  /** Partitions read count */
+  read_partitions_count?: number
+  /** Pruned files count */
+  pruned_files_count?: number
+  /** Whether result is from cache */
+  result_from_cache?: boolean
+  /** Percentage of bytes read from cache */
+  bytes_read_from_cache_percentage?: number
+  /** Remote rows written */
+  write_remote_rows?: number
+  /** Remote files written */
+  write_remote_files?: number
+}
+
+/**
+ * Query info from Query History API
+ * @see https://docs.databricks.com/api/workspace/queryhistory/list
+ */
+export type QueryInfo = {
+  query_id: string
+  status: string
+  query_text: string
+  query_start_time_ms: number
+  execution_end_time_ms?: number
+  query_end_time_ms?: number
+  user_id: number
+  user_name: string
+  endpoint_id: string
+  warehouse_id: string
+  rows_produced?: number
+  metrics?: QueryMetrics
+  is_final: boolean
+  duration?: number
+  statement_type?: string
+}
+
 /** Column schema information */
 export type ColumnInfo = {
   name: string
@@ -109,7 +188,9 @@ export type StatementParameter = {
  */
 export type ExecuteStatementOptions = {
   /** Progress callback (called on each poll) */
-  onProgress?: (status: StatementStatus) => void
+  onProgress?: (status: StatementStatus, metrics?: QueryMetrics) => void
+  /** Enable query metrics fetching during polling (default: false) */
+  enableMetrics?: boolean
   /** Abort signal for cancellation */
   signal?: AbortSignal
   /** Result byte limit */

@@ -6,6 +6,7 @@ import type {
   RowObject,
   StatementResult,
 } from '../types.js'
+
 import { fetchRow } from './fetchRow.js'
 
 /**
