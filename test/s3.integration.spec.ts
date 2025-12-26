@@ -248,6 +248,7 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
 
       // Merge and upload to S3
       const mergedResult = await mergeExternalLinks(result, auth, {
+        forceMerge: true,
         mergeStreamToExternalLink: (stream) => uploadToS3(stream, 'CSV'),
       })
 
@@ -296,6 +297,7 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
       }
 
       const mergedResult = await mergeExternalLinks(result, auth, {
+        forceMerge: true,
         mergeStreamToExternalLink: (stream) => uploadToS3(stream, 'JSON_ARRAY'),
       })
 
@@ -332,6 +334,7 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
       }
 
       const mergedResult = await mergeExternalLinks(result, auth, {
+        forceMerge: true,
         mergeStreamToExternalLink: (stream) => uploadToS3(stream, 'ARROW_STREAM'),
       })
 
@@ -368,6 +371,7 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
       }
 
       const mergedResult = await mergeExternalLinks(result, auth, {
+        forceMerge: true,
         mergeStreamToExternalLink: (stream) => uploadToS3(stream, 'CSV'),
       })
 

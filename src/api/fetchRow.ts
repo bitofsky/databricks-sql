@@ -1,8 +1,4 @@
-import { parser } from 'stream-json'
-import { streamArray } from 'stream-json/streamers/StreamArray'
 import type { Readable } from 'node:stream'
-import { getChunk } from '../databricks-api.js'
-import { DatabricksSqlError, AbortError } from '../errors.js'
 import type {
   AuthInfo,
   FetchRowsOptions,
@@ -10,6 +6,10 @@ import type {
   RowObject,
   StatementResult,
 } from '../types.js'
+import { parser } from 'stream-json'
+import { streamArray } from 'stream-json/streamers/StreamArray'
+import { getChunk } from '../databricks-api.js'
+import { DatabricksSqlError, AbortError } from '../errors.js'
 import { validateSucceededResult } from '../util.js'
 import { createRowMapper } from '../createRowMapper.js'
 import { fetchStream } from './fetchStream.js'
