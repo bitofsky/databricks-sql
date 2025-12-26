@@ -183,7 +183,9 @@ function fetchStream(
 ```
 - Merges `EXTERNAL_LINKS` into a single binary stream.
 - Preserves the original format (`JSON_ARRAY`, `CSV`, `ARROW_STREAM`).
+- Throws if the result is `INLINE`.
 - Ends as an empty stream when no external links exist.
+- `forceMerge: true` forces merge even when there is only a single external link.
 
 ### mergeExternalLinks(statementResult, auth, options)
 ```ts
@@ -196,7 +198,8 @@ function mergeExternalLinks(
 - Creates a merged stream from `EXTERNAL_LINKS`, uploads it via
   `options.mergeStreamToExternalLink`, then returns a `StatementResult`
   with a single external link.
-- Returns the original result unchanged when input is `INLINE`.
+- Returns the original result unchanged when input is `INLINE` or already a
+  single external link (unless `forceMerge: true`).
 
 ### Options (Summary)
 ```ts
@@ -228,10 +231,12 @@ type FetchAllOptions = {
 
 type FetchStreamOptions = {
   signal?: AbortSignal
+  forceMerge?: boolean
 }
 
 type MergeExternalLinksOptions = {
   signal?: AbortSignal
+  forceMerge?: boolean
   mergeStreamToExternalLink: (stream: Readable) => Promise<{
     externalLink: string
     byte_count: number
@@ -243,6 +248,7 @@ type MergeExternalLinksOptions = {
 ## Notes
 - Databricks requires `INLINE` results to use `JSON_ARRAY` format. `INLINE + CSV` is rejected by the API.
 - `EXTERNAL_LINKS` are merged using `@bitofsky/merge-streams`.
+- Requires Node.js >= 20 for global `fetch` and Web streams.
 
 ## Development
 ```bash

@@ -1,3 +1,6 @@
+import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import type { ReadableStream as WebReadableStream } from 'node:stream/web'
 import type { StatementResult, StatementManifest } from './types.js'
 import { AbortError, DatabricksSqlError } from './errors.js'
 
@@ -79,4 +82,35 @@ export function validateSucceededResult(
     )
 
   return statementResult.manifest
+}
+
+function isWebReadableStream(body: unknown): body is WebReadableStream {
+  return typeof (body as WebReadableStream).getReader === 'function'
+}
+
+export async function pipeUrlToOutput(
+  url: string,
+  output: NodeJS.WritableStream,
+  signal?: AbortSignal
+): Promise<void> {
+  // Uses Node 20+ global fetch with Web streams.
+  if (signal?.aborted)
+    throw new AbortError('Aborted while streaming')
+
+  const response = await fetch(url, signal ? { signal } : undefined)
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch external link: ${response.status} ${response.statusText}`
+    )
+  }
+
+  if (!response.body)
+    return void output.end()
+
+  const body = response.body
+  const input = isWebReadableStream(body)
+    ? Readable.fromWeb(body)
+    : (body as NodeJS.ReadableStream)
+
+  await pipeline(input, output)
 }

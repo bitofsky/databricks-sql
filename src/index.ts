@@ -5,4 +5,4 @@ export type * from './types.js'
 export * from './errors.js'
 
 // Core functions
-export * from './api'
+export * from './api/index.js'

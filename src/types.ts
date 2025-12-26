@@ -150,7 +150,10 @@ export type RowObject = Record<string, unknown>
 export type FetchRowFormat = 'JSON_ARRAY' | 'JSON_OBJECT'
 
 /** Options for fetchStream */
-export type FetchStreamOptions = SignalOptions
+export type FetchStreamOptions = SignalOptions & {
+  /** Force merge even when there is only a single external link */
+  forceMerge?: boolean
+}
 
 /** Options for fetchRow */
 export type FetchRowsOptions = SignalOptions & {
@@ -180,6 +183,8 @@ export type MergeExternalLinksResult = {
 export type MergeExternalLinksOptions = SignalOptions & {
   /** Callback to upload merged stream to external link */
   mergeStreamToExternalLink: (stream: Readable) => Promise<MergeExternalLinksResult>
+  /** Force merge even when there is only a single external link chunk */
+  forceMerge?: boolean
 }
 
 /**

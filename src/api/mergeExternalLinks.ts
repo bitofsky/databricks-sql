@@ -17,14 +17,27 @@ export async function mergeExternalLinks(
   auth: AuthInfo,
   options: MergeExternalLinksOptions
 ): Promise<StatementResult> {
-  const { signal, mergeStreamToExternalLink } = options
+  const { signal, mergeStreamToExternalLink, forceMerge } = options
 
   // If not external links, return original as-is
   if (!statementResult.result?.external_links)
     return statementResult
 
+  if (!forceMerge) {
+    const totalChunks = statementResult.manifest?.total_chunk_count
+    const externalLinks = statementResult.result.external_links
+    const isSingleChunk = totalChunks === undefined ? externalLinks.length <= 1 : totalChunks <= 1
+
+    // Skip merging when a single external link already exists unless forced.
+    if (isSingleChunk && externalLinks.length <= 1)
+      return statementResult
+  }
+
   // Get merged stream via fetchStream
-  const stream = fetchStream(statementResult, auth, signal ? { signal } : {})
+  const stream = fetchStream(statementResult, auth, {
+    ...signal ? { signal } : {},
+    ...forceMerge !== undefined ? { forceMerge } : {},
+  })
 
   // Upload via callback
   const uploadResult = await mergeStreamToExternalLink(stream)

@@ -62,6 +62,7 @@ describe('mergeExternalLinks', () => {
 
     const result = await mergeExternalLinks(mockExternalLinksResult, mockAuth, {
       mergeStreamToExternalLink: mockCallback,
+      forceMerge: true,
     })
 
     // Verify callback was called
@@ -113,6 +114,7 @@ describe('mergeExternalLinks', () => {
 
     await mergeExternalLinks(mockExternalLinksResult, mockAuth, {
       mergeStreamToExternalLink: mockCallback,
+      forceMerge: true,
     })
 
     // Verify callback received the merged data
@@ -154,6 +156,7 @@ describe('mergeExternalLinks', () => {
       mergeExternalLinks(mockExternalLinksResult, mockAuth, {
         signal: controller.signal,
         mergeStreamToExternalLink: mockCallback,
+        forceMerge: true,
       })
     ).rejects.toThrow(/abort/i)
   })
@@ -170,6 +173,7 @@ describe('mergeExternalLinks', () => {
     await expect(
       mergeExternalLinks(mockExternalLinksResult, mockAuth, {
         mergeStreamToExternalLink: mockCallback,
+        forceMerge: true,
       })
     ).rejects.toThrow('Upload failed')
   })
@@ -189,6 +193,7 @@ describe('mergeExternalLinks', () => {
 
     const result = await mergeExternalLinks(mockExternalLinksResult, mockAuth, {
       mergeStreamToExternalLink: vi.fn().mockResolvedValue(uploadResult),
+      forceMerge: true,
     })
 
     // Verify original manifest properties are preserved
@@ -197,5 +202,16 @@ describe('mergeExternalLinks', () => {
     expect(result.manifest?.total_row_count).toBe(
       mockExternalLinksResult.manifest?.total_row_count
     )
+  })
+
+  it('should return original for single external link by default', async () => {
+    const mockCallback = vi.fn()
+
+    const result = await mergeExternalLinks(mockExternalLinksResult, mockAuth, {
+      mergeStreamToExternalLink: mockCallback,
+    })
+
+    expect(result).toBe(mockExternalLinksResult)
+    expect(mockCallback).not.toHaveBeenCalled()
   })
 })
