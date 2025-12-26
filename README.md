@@ -20,7 +20,8 @@ The goal is simple: stream big results with stable memory usage and without forc
 
 ## Highlights
 - Direct REST calls to Statement Execution API.
-- Polls statement execution until completion.
+- Optimized polling with server-side wait (up to 50s) before falling back to client polling.
+- Query metrics support via Query History API (`enableMetrics` option).
 - Efficient external link handling: merge chunks into a single stream.
 - `mergeExternalLinks` supports streaming uploads and returns a new StatementResult with a presigned URL.
 - `fetchRow`/`fetchAll` support `JSON_OBJECT` (schema-based row mapping).
@@ -98,6 +99,35 @@ const merged = await mergeExternalLinks(result, auth, {
 console.log(merged.result?.external_links?.[0].external_link) // Presigned URL to merged CSV
 ```
 
+## Sample (Progress with Metrics)
+Track query progress with execution metrics:
+
+```ts
+import { executeStatement } from '@bitofsky/databricks-sql'
+
+const auth = {
+  token: process.env.DATABRICKS_TOKEN!,
+  host: process.env.DATABRICKS_HOST!,
+  httpPath: process.env.DATABRICKS_HTTP_PATH!,
+}
+
+const result = await executeStatement(
+  'SELECT * FROM samples.tpch.lineitem LIMIT 10000',
+  auth,
+  {
+    enableMetrics: true,
+    onProgress: (status, metrics) => {
+      console.log(`State: ${status.state}`)
+      if (metrics) {  // metrics is optional, only present when enableMetrics: true
+        console.log(`  Execution time: ${metrics.execution_time_ms}ms`)
+        console.log(`  Rows produced: ${metrics.rows_produced_count}`)
+        console.log(`  Bytes read: ${metrics.read_bytes}`)
+      }
+    },
+  }
+)
+```
+
 ## Sample (Abort)
 Cancel a long-running query and stop polling/streaming:
 
@@ -147,7 +177,9 @@ function executeStatement(
 ): Promise<StatementResult>
 ```
 - Calls the Databricks Statement Execution API and polls until completion.
-- Use `options.onProgress` to receive status updates.
+- Server waits up to 50s (`wait_timeout`) before client-side polling begins.
+- Use `options.onProgress` to receive status updates with optional metrics.
+- Set `enableMetrics: true` to fetch query metrics from Query History API on each poll.
 - Throws `DatabricksSqlError` on failure, `StatementCancelledError` on cancel, and `AbortError` on abort.
 
 ### fetchRow(statementResult, auth, options?)
@@ -204,17 +236,18 @@ function mergeExternalLinks(
 ### Options (Summary)
 ```ts
 type ExecuteStatementOptions = {
-  onProgress?: (status: StatementStatus) => void
+  onProgress?: (status: StatementStatus, metrics?: QueryMetrics) => void
+  enableMetrics?: boolean      // Fetch metrics from Query History API (default: false)
   signal?: AbortSignal
   disposition?: 'INLINE' | 'EXTERNAL_LINKS'
   format?: 'JSON_ARRAY' | 'ARROW_STREAM' | 'CSV'
-  wait_timeout?: string
+  wait_timeout?: string        // Server wait time (default: '50s', max: '50s')
   row_limit?: number
   byte_limit?: number
   catalog?: string
   schema?: string
   parameters?: StatementParameter[]
-  on_wait_timeout?: 'CONTINUE' | 'CANCEL'
+  on_wait_timeout?: 'CONTINUE' | 'CANCEL'  // Default: 'CONTINUE'
   warehouse_id?: string
 }
 
@@ -248,6 +281,8 @@ type MergeExternalLinksOptions = {
 ## Notes
 - Databricks requires `INLINE` results to use `JSON_ARRAY` format. `INLINE + CSV` is rejected by the API.
 - `EXTERNAL_LINKS` are merged using `@bitofsky/merge-streams`.
+- Query metrics are fetched from `/api/2.0/sql/history/queries/{query_id}?include_metrics=true` when `enableMetrics: true`.
+- Metrics may not be immediately available; `is_final: true` indicates complete metrics.
 - Requires Node.js >= 20 for global `fetch` and Web streams.
 
 ## Development
