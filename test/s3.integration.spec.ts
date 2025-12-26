@@ -119,7 +119,7 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
         {
           name: 'big_int',
           type_text: 'BIGINT',
-          type_name: 'BIGINT',
+          type_name: 'LONG',
           position: 2,
         },
         {

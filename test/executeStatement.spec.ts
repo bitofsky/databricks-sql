@@ -7,6 +7,7 @@ import {
   mockRunningResult,
   mockSucceededAfterPolling,
   mockFailedResult,
+  mockQueryInfo,
 } from './mocks.js'
 
 describe('executeStatement', () => {
@@ -53,9 +54,9 @@ describe('executeStatement', () => {
 
     const resultPromise = executeStatement('SELECT 42', mockAuth)
 
-    // Advance timers for polling delays
-    await vi.advanceTimersByTimeAsync(500) // First poll delay
-    await vi.advanceTimersByTimeAsync(750) // Second poll delay (500 * 1.5)
+    // Advance timers for polling delays (fixed 5000ms interval)
+    await vi.advanceTimersByTimeAsync(5000) // First poll delay
+    await vi.advanceTimersByTimeAsync(5000) // Second poll delay
 
     const result = await resultPromise
 
@@ -79,12 +80,134 @@ describe('executeStatement', () => {
     const onProgress = vi.fn()
     const resultPromise = executeStatement('SELECT 42', mockAuth, { onProgress })
 
-    await vi.advanceTimersByTimeAsync(500)
+    await vi.advanceTimersByTimeAsync(5000)
 
     await resultPromise
 
-    expect(onProgress).toHaveBeenCalledWith({ state: 'PENDING' })
-    expect(onProgress).toHaveBeenCalledWith({ state: 'SUCCEEDED' })
+    expect(onProgress).toHaveBeenCalledWith({ state: 'PENDING' }, undefined)
+    expect(onProgress).toHaveBeenCalledWith({ state: 'SUCCEEDED' }, undefined)
+  })
+
+  it('should not fetch metrics when enableMetrics is false', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockPendingResult),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockSucceededAfterPolling),
+      })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const onProgress = vi.fn()
+    const resultPromise = executeStatement('SELECT 42', mockAuth, { onProgress })
+
+    await vi.advanceTimersByTimeAsync(5000)
+    await resultPromise
+
+    // Only 2 calls: postStatement + getStatement (no metrics calls)
+    expect(mockFetch).toHaveBeenCalledTimes(2)
+    // onProgress should be called without metrics
+    expect(onProgress).toHaveBeenCalledWith({ state: 'PENDING' }, undefined)
+  })
+
+  it('should fetch metrics when enableMetrics is true', async () => {
+    const mockFetch = vi
+      .fn()
+      // postStatement
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockPendingResult),
+      })
+      // getQueryMetrics (during polling)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockQueryInfo),
+      })
+      // getStatement
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockSucceededAfterPolling),
+      })
+      // getQueryMetrics (final)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockQueryInfo),
+      })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const onProgress = vi.fn()
+    const resultPromise = executeStatement('SELECT 42', mockAuth, {
+      onProgress,
+      enableMetrics: true,
+    })
+
+    await vi.advanceTimersByTimeAsync(5000)
+    await resultPromise
+
+    // 4 calls: postStatement + getQueryMetrics + getStatement + getQueryMetrics
+    expect(mockFetch).toHaveBeenCalledTimes(4)
+
+    // Check that onProgress was called with metrics
+    expect(onProgress).toHaveBeenCalledWith(
+      { state: 'PENDING' },
+      expect.objectContaining({
+        total_time_ms: 959,
+        execution_time_ms: 642,
+      })
+    )
+    expect(onProgress).toHaveBeenCalledWith(
+      { state: 'SUCCEEDED' },
+      expect.objectContaining({
+        total_time_ms: 959,
+      })
+    )
+  })
+
+  it('should handle metrics API failure gracefully', async () => {
+    const mockFetch = vi
+      .fn()
+      // postStatement
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockPendingResult),
+      })
+      // getQueryMetrics fails (401 - no retry)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: () => Promise.resolve('Unauthorized'),
+      })
+      // getStatement
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockSucceededAfterPolling),
+      })
+      // getQueryMetrics fails again (401 - no retry)
+      .mockResolvedValueOnce({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: () => Promise.resolve('Unauthorized'),
+      })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const onProgress = vi.fn()
+    const resultPromise = executeStatement('SELECT 42', mockAuth, {
+      onProgress,
+      enableMetrics: true,
+    })
+
+    await vi.advanceTimersByTimeAsync(5000)
+    const result = await resultPromise
+
+    // Statement should still succeed even if metrics fail
+    expect(result.status.state).toBe('SUCCEEDED')
+    // onProgress should be called without metrics (undefined)
+    expect(onProgress).toHaveBeenCalledWith({ state: 'PENDING' }, undefined)
   })
 
   it('should throw DatabricksSqlError when statement fails', async () => {

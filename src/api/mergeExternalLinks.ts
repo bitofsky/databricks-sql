@@ -1,10 +1,11 @@
 import type {
   AuthInfo,
-  StatementResult,
   MergeExternalLinksOptions,
+  StatementResult,
 } from '../types.js'
-import { fetchStream } from './fetchStream.js'
+
 import { validateSucceededResult } from '../util.js'
+import { fetchStream } from './fetchStream.js'
 
 /**
  * Merge external links from StatementResult into a single stream,

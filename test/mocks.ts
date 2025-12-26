@@ -1,4 +1,4 @@
-import type { AuthInfo, StatementResult } from '../src/types.js'
+import type { AuthInfo, StatementResult, QueryInfo } from '../src/types.js'
 
 export const mockAuth: AuthInfo = {
   token: 'test-token',
@@ -116,3 +116,30 @@ export const mockExternalLinkData = [
   ['3', '6'],
   ['4', '8'],
 ]
+
+// Mock query info with metrics
+export const mockQueryInfo: QueryInfo = {
+  query_id: '01f0e17f-pending-test',
+  status: 'FINISHED',
+  query_text: 'SELECT 42',
+  query_start_time_ms: 1766720174230,
+  execution_end_time_ms: 1766720175189,
+  query_end_time_ms: 1766720175189,
+  user_id: 12345,
+  user_name: 'test@example.com',
+  endpoint_id: 'abc123def456',
+  warehouse_id: 'abc123def456',
+  rows_produced: 1,
+  is_final: true,
+  duration: 959,
+  statement_type: 'SELECT',
+  metrics: {
+    total_time_ms: 959,
+    read_bytes: 0,
+    rows_produced_count: 1,
+    compilation_time_ms: 213,
+    execution_time_ms: 642,
+    result_fetch_time_ms: 43,
+    result_from_cache: false,
+  },
+}

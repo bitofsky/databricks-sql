@@ -4,8 +4,9 @@ import type {
   ExecuteStatementRequest,
   StatementResult,
   StatementState,
+  QueryMetrics,
 } from '../types.js'
-import { postStatement, getStatement, cancelStatement } from '../databricks-api.js'
+import { postStatement, getStatement, cancelStatement, getQueryMetrics } from '../databricks-api.js'
 import { extractWarehouseId, throwIfAborted, delay } from '../util.js'
 import {
   DatabricksSqlError,
@@ -19,8 +20,21 @@ const TERMINAL_STATES = new Set<StatementState>([
   'CANCELED',
   'CLOSED',
 ])
-const POLL_INTERVAL_MS = 500
-const MAX_POLL_INTERVAL_MS = 5000
+const POLL_INTERVAL_MS = 5000
+
+async function fetchMetrics(
+  auth: AuthInfo,
+  statementId: string,
+  signal?: AbortSignal
+): Promise<QueryMetrics | undefined> {
+  try {
+    const queryInfo = await getQueryMetrics(auth, statementId, signal)
+    return queryInfo.metrics
+  } catch {
+    // Ignore metrics fetch errors - non-critical
+    return undefined
+  }
+}
 
 /**
  * Execute SQL statement and poll until completion
@@ -31,13 +45,17 @@ export async function executeStatement(
   options: ExecuteStatementOptions = {}
 ): Promise<StatementResult> {
   const warehouseId = options.warehouse_id ?? extractWarehouseId(auth.httpPath)
-  const { signal, onProgress } = options
+  const { signal, onProgress, enableMetrics } = options
 
   // Check if already aborted
   throwIfAborted(signal, 'executeStatement')
 
+  // Helper to call onProgress with optional metrics
+  const emitProgress = onProgress
+    ? async (statementId: string) => onProgress(result.status, enableMetrics ? await fetchMetrics(auth, statementId, signal) : undefined)
+    : undefined
+
   // 1. Build request (filter out undefined values)
-  // Keep payload small and aligned with the REST API contract.
   const request = Object.fromEntries(
     Object.entries({
       warehouse_id: warehouseId,
@@ -58,31 +76,19 @@ export async function executeStatement(
   let result = await postStatement(auth, request, signal)
 
   // 3. Poll until terminal state
-  let pollInterval = POLL_INTERVAL_MS
-
   while (!TERMINAL_STATES.has(result.status.state)) {
-    // Check abort signal
     if (signal?.aborted) {
-      // Try to cancel on server
-      await cancelStatement(auth, result.statement_id).catch(() => {
-        // Ignore cancel errors
-      })
+      await cancelStatement(auth, result.statement_id).catch(() => { })
       throw new AbortError('Aborted during polling')
     }
 
-    // Call progress callback
-    onProgress?.(result.status)
-
-    // Wait before next poll (exponential backoff)
-    await delay(pollInterval, signal)
-    pollInterval = Math.min(pollInterval * 1.5, MAX_POLL_INTERVAL_MS)
-
-    // Get current status
+    await emitProgress?.(result.statement_id)
+    await delay(POLL_INTERVAL_MS, signal)
     result = await getStatement(auth, result.statement_id, signal)
   }
 
   // 4. Final progress callback
-  onProgress?.(result.status)
+  await emitProgress?.(result.statement_id)
 
   // 5. Handle terminal states
   if (result.status.state === 'SUCCEEDED')
