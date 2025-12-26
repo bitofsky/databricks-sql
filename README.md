@@ -48,12 +48,15 @@ console.log(rows) // [{ value: 1 }]
 ```
 
 ## Sample (Streaming + Presigned URL)
-Stream external links into S3, then return a single presigned URL:
+Stream external links into S3 with gzip compression, then return a single presigned URL:
 
 ```ts
 import { executeStatement, mergeExternalLinks } from '@bitofsky/databricks-sql'
-import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { createGzip } from 'zlib'
+import { pipeline } from 'stream/promises'
+import { PassThrough } from 'stream'
 
 const auth = {
   token: process.env.DATABRICKS_TOKEN!,
@@ -72,31 +75,40 @@ const result = await executeStatement(
 
 const merged = await mergeExternalLinks(result, auth, {
   mergeStreamToExternalLink: async (stream) => {
-    const key = `merged-${Date.now()}.csv`
-    await s3.send(
+    const key = `merged-${Date.now()}.csv.gz`
+    const gzip = createGzip() // Compress with gzip and upload to S3
+    const passThrough = new PassThrough()
+
+    const uploadPromise = s3.send(
       new PutObjectCommand({
         Bucket: bucket,
         Key: key,
-        Body: stream,
+        Body: passThrough,
         ContentType: 'text/csv',
+        ContentEncoding: 'gzip',
       })
     )
 
-    const externalLink = await getSignedUrl(
-      s3,
-      new GetObjectCommand({ Bucket: bucket, Key: key }),
-      { expiresIn: 3600 }
-    )
+    await Promise.all([
+      pipeline(stream, gzip, passThrough),
+      uploadPromise,
+    ])
+
+    // Get actual uploaded size via HeadObject
+    const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }))
+    // Generate presigned URL valid for 1 hour
+    const externalLink = await getSignedUrl(s3, new GetObjectCommand({ Bucket: bucket, Key: key }),{ expiresIn: 3600 })
 
     return {
-      externalLink,
-      byte_count: 0,
-      expiration: new Date(Date.now() + 3600 * 1000).toISOString(),
+      externalLink, // Presigned URL to merged gzip CSV
+      byte_count: head.ContentLength ?? 0, // Actual compressed size
+      expiration: new Date(Date.now() + 3600 * 1000).toISOString(), // 1 hour from now
     }
   },
 })
 
-console.log(merged.result?.external_links?.[0].external_link) // Presigned URL to merged CSV
+console.log(merged.result?.external_links?.[0].external_link) // Presigned URL to merged gzip CSV
+console.log(merged.result?.external_links?.[0].byte_count)    // Actual compressed size
 ```
 
 ## Sample (Progress with Metrics)
