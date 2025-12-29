@@ -18,41 +18,59 @@ export async function mergeExternalLinks(
   auth: AuthInfo,
   options: MergeExternalLinksOptions
 ): Promise<StatementResult> {
-  const { signal, mergeStreamToExternalLink, forceMerge } = options
+  const { signal, mergeStreamToExternalLink, forceMerge, logger } = options
+  const statementId = statementResult.statement_id
+  const manifest = statementResult.manifest
+  const externalLinks = statementResult.result?.external_links
+  const totalChunks = manifest?.total_chunk_count ?? 0
+  const logContext = { statementId, manifest, totalChunks, forceMerge }
 
   // If not external links, return original as-is
-  if (!statementResult.result?.external_links)
+  if (!externalLinks) {
+    logger?.info?.(`mergeExternalLinks no external links to merge for statement ${statementId}.`, logContext)
     return statementResult
+  }
 
   if (!forceMerge) {
-    const totalChunks = statementResult.manifest?.total_chunk_count
-    const externalLinks = statementResult.result.external_links
-    const isSingleChunk = totalChunks === undefined ? externalLinks.length <= 1 : totalChunks <= 1
+    const isSingleChunk = totalChunks <= 1
 
     // Skip merging when a single external link already exists unless forced.
-    if (isSingleChunk && externalLinks.length <= 1)
+    if (isSingleChunk) {
+      logger?.info?.(`mergeExternalLinks skipping merge for single external link in statement ${statementId}.`, {
+        ...logContext,
+        totalChunks,
+      })
       return statementResult
+    }
   }
 
   // Get merged stream via fetchStream
+  logger?.info?.(`mergeExternalLinks merging external links for statement ${statementId}.`, logContext)
   const stream = fetchStream(statementResult, auth, {
     ...signal ? { signal } : {},
     ...forceMerge !== undefined ? { forceMerge } : {},
+    ...logger ? { logger } : {},
   })
 
   // Upload via callback
+  logger?.info?.(`mergeExternalLinks uploading merged external link for statement ${statementId}.`, logContext)
   const uploadResult = await mergeStreamToExternalLink(stream)
+  logger?.info?.(`mergeExternalLinks uploaded merged external link for statement ${statementId}.`, {
+    ...logContext,
+    byteCount: uploadResult.byte_count,
+    expiration: uploadResult.expiration,
+  })
 
   // Build updated StatementResult
   // Manifest must exist for external links; validate before constructing new result.
-  const manifest = validateSucceededResult(statementResult)
-  const totalRowCount = manifest.total_row_count ?? 0
+  const validatedManifest = validateSucceededResult(statementResult)
+  const totalRowCount = validatedManifest.total_row_count ?? 0
 
   return {
     statement_id: statementResult.statement_id,
     status: statementResult.status,
     manifest: {
-      ...manifest,
+      ...validatedManifest,
       total_chunk_count: 1,
       total_byte_count: uploadResult.byte_count,
       chunks: [

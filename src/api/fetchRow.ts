@@ -25,22 +25,34 @@ export async function fetchRow(
   auth: AuthInfo,
   options: FetchRowsOptions = {}
 ): Promise<void> {
-  const { signal, onEachRow, format } = options
+  const { signal, onEachRow, format, logger } = options
   const manifest = validateSucceededResult(statementResult)
+  const statementId = statementResult.statement_id
+  const logContext = { statementId, manifest, requestedFormat: format }
   // Map JSON_ARRAY rows to JSON_OBJECT when requested.
   const mapRow = createRowMapper(manifest, format)
 
+  logger?.info?.(`fetchRow fetching rows for statement ${statementId}.`, {
+    ...logContext,
+    resultType: statementResult.result?.external_links ? 'EXTERNAL_LINKS' : 'INLINE',
+  })
+
   if (statementResult.result?.external_links) {
     if (manifest.format !== 'JSON_ARRAY') {
+      logger?.error?.(`fetchRow only supports JSON_ARRAY for external_links; got ${manifest.format}.`, logContext)
       throw new DatabricksSqlError(
         `fetchRow only supports JSON_ARRAY for external_links. Received: ${manifest.format}`,
         'UNSUPPORTED_FORMAT',
-        statementResult.statement_id
+        statementId
       )
     }
 
-    const stream = fetchStream(statementResult, auth, signal ? { signal } : {})
-    await consumeJsonArrayStream(stream, mapRow, onEachRow, signal)
+    logger?.info?.(`fetchRow streaming external links for statement ${statementId}.`, logContext)
+    const stream = fetchStream(statementResult, auth, {
+      ...signal ? { signal } : {},
+      ...logger ? { logger } : {},
+    })
+    await consumeJsonArrayStream(stream, mapRow, onEachRow, signal, logger, logContext)
     return
   }
 
@@ -49,6 +61,10 @@ export async function fetchRow(
   // Process first chunk (inline data_array)
   const dataArray = statementResult.result?.data_array
   if (dataArray) {
+    logger?.info?.(`fetchRow processing inline rows for statement ${statementId}.`, {
+      ...logContext,
+      inlineRows: dataArray.length,
+    })
     for (const row of dataArray) {
       if (signal?.aborted) throw new AbortError('Aborted')
       // Convert row to requested shape before callback.
@@ -58,7 +74,7 @@ export async function fetchRow(
 
   // Process additional chunks if any
   if (totalChunks > 1) {
-    const statementId = statementResult.statement_id
+    logger?.info?.(`fetchRow processing ${totalChunks} chunks for statement ${statementId}.`, logContext)
     for (let chunkIndex = 1; chunkIndex < totalChunks; chunkIndex++) {
       if (signal?.aborted) throw new AbortError('Aborted')
 
@@ -87,13 +103,19 @@ async function consumeJsonArrayStream(
   stream: Readable,
   mapRow: (row: RowArray) => RowArray | RowObject,
   onEachRow: ((row: RowArray | RowObject) => void) | undefined,
-  signal: AbortSignal | undefined
+  signal: AbortSignal | undefined,
+  logger: FetchRowsOptions['logger'],
+  logContext: Record<string, unknown>
 ): Promise<void> {
   // Stream JSON_ARRAY as individual rows to avoid buffering whole payloads.
   const jsonStream = stream.pipe(parser()).pipe(streamArray())
 
   for await (const item of jsonStream) {
     if (signal?.aborted) {
+      logger?.info?.('fetchRow abort detected while streaming JSON_ARRAY rows.', {
+        ...logContext,
+        aborted: signal.aborted,
+      })
       stream.destroy(new AbortError('Aborted'))
       throw new AbortError('Aborted')
     }

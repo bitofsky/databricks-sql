@@ -84,8 +84,14 @@ describe('executeStatement', () => {
 
     await resultPromise
 
-    expect(onProgress).toHaveBeenCalledWith({ state: 'PENDING' }, undefined)
-    expect(onProgress).toHaveBeenCalledWith({ state: 'SUCCEEDED' }, undefined)
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        body: expect.stringContaining('"wait_timeout":"0s"'),
+      })
+    )
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'PENDING' } }), undefined)
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'SUCCEEDED' } }), undefined)
   })
 
   it('should not fetch metrics when enableMetrics is false', async () => {
@@ -110,7 +116,7 @@ describe('executeStatement', () => {
     // Only 2 calls: postStatement + getStatement (no metrics calls)
     expect(mockFetch).toHaveBeenCalledTimes(2)
     // onProgress should be called without metrics
-    expect(onProgress).toHaveBeenCalledWith({ state: 'PENDING' }, undefined)
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'PENDING' } }), undefined)
   })
 
   it('should fetch metrics when enableMetrics is true', async () => {
@@ -152,14 +158,14 @@ describe('executeStatement', () => {
 
     // Check that onProgress was called with metrics
     expect(onProgress).toHaveBeenCalledWith(
-      { state: 'PENDING' },
+      expect.objectContaining({ status: { state: 'PENDING' } }),
       expect.objectContaining({
         total_time_ms: 959,
         execution_time_ms: 642,
       })
     )
     expect(onProgress).toHaveBeenCalledWith(
-      { state: 'SUCCEEDED' },
+      expect.objectContaining({ status: { state: 'SUCCEEDED' } }),
       expect.objectContaining({
         total_time_ms: 959,
       })
@@ -207,7 +213,7 @@ describe('executeStatement', () => {
     // Statement should still succeed even if metrics fail
     expect(result.status.state).toBe('SUCCEEDED')
     // onProgress should be called without metrics (undefined)
-    expect(onProgress).toHaveBeenCalledWith({ state: 'PENDING' }, undefined)
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'PENDING' } }), undefined)
   })
 
   it('should throw DatabricksSqlError when statement fails', async () => {
@@ -235,6 +241,36 @@ describe('executeStatement', () => {
 
     // Should not have made any fetch calls
     expect(mockFetch).not.toHaveBeenCalled()
+  })
+
+  it('should cancel statement when aborted during polling', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockPendingResult),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({}),
+      })
+    vi.stubGlobal('fetch', mockFetch)
+
+    const controller = new AbortController()
+    const resultPromise = executeStatement('SELECT 42', mockAuth, {
+      signal: controller.signal,
+    })
+
+    await Promise.resolve()
+    controller.abort()
+
+    await expect(resultPromise).rejects.toThrow('Aborted')
+    expect(mockFetch).toHaveBeenCalledWith(
+      expect.stringContaining(
+        `/api/2.0/sql/statements/${mockPendingResult.statement_id}/cancel`
+      ),
+      expect.objectContaining({ method: 'POST' })
+    )
   })
 
   it('should extract warehouse_id from httpPath', async () => {

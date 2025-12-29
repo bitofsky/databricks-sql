@@ -19,12 +19,18 @@ export async function fetchAll(
   options: FetchAllOptions = {}
 ): Promise<Array<RowArray | RowObject>> {
   const rows: Array<RowArray | RowObject> = []
+  const statementId = statementResult.statement_id
+  const manifest = statementResult.manifest
+  const logContext = { statementId, manifest, requestedFormat: options.format }
   const fetchOptions: FetchRowsOptions = {
     // Collect rows as they are streamed in.
     onEachRow: (row) => {
       rows.push(row)
     },
   }
+  const { logger } = options
+
+  logger?.info?.(`fetchAll fetching all rows for statement ${statementId}.`, logContext)
 
   if (options.signal)
     fetchOptions.signal = options.signal
@@ -32,6 +38,14 @@ export async function fetchAll(
   if (options.format)
     fetchOptions.format = options.format
 
+  if (options.logger)
+    fetchOptions.logger = options.logger
+
   await fetchRow(statementResult, auth, fetchOptions)
+  logger?.info?.(`fetchAll fetched ${rows.length} rows for statement ${statementId}.`, {
+    ...logContext,
+    rowCount: rows.length,
+    resolvedFormat: options.format ?? manifest?.format,
+  })
   return rows
 }

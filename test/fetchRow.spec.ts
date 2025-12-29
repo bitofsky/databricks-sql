@@ -7,7 +7,11 @@ import {
   mockExternalLinksResult,
   mockPendingResult,
 } from './mocks.js'
-import { createMockReadableStream } from './testUtil.js'
+import {
+  createExternalLinkInfo,
+  createGetChunkResponse,
+  createStreamResponse,
+} from './testUtil.js'
 
 describe('fetchRow', () => {
   afterEach(() => {
@@ -63,18 +67,15 @@ describe('fetchRow', () => {
     expect(rows[2]).toEqual(['3', 'third'])
   })
 
-  it('should throw error for non-succeeded statement', async () => {
-    await expect(fetchRow(mockPendingResult, mockAuth)).rejects.toThrow(
-      'Cannot fetch from non-succeeded statement: PENDING'
-    )
-  })
-
-  it('should throw error for statement without manifest', async () => {
+  it('should validate result state and manifest', async () => {
     const noManifestResult: StatementResult = {
       statement_id: 'test',
       status: { state: 'SUCCEEDED' },
     }
 
+    await expect(fetchRow(mockPendingResult, mockAuth)).rejects.toThrow(
+      'Cannot fetch from non-succeeded statement: PENDING'
+    )
     await expect(fetchRow(noManifestResult, mockAuth)).rejects.toThrow(
       'Statement result has no manifest'
     )
@@ -118,10 +119,8 @@ describe('fetchRow', () => {
   })
 
   it('should process external links data_array', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      body: createMockReadableStream('[["1","2"],["3","4"]]'),
-    })
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse('[["1","2"],["3","4"]]'))
     vi.stubGlobal('fetch', mockFetch)
 
     const rows: RowArray[] = []
@@ -133,10 +132,8 @@ describe('fetchRow', () => {
   })
 
   it('should map external links rows to JSON objects', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      body: createMockReadableStream('[["1","2"],["3","4"]]'),
-    })
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse('[["1","2"],["3","4"]]'))
     vi.stubGlobal('fetch', mockFetch)
 
     const rows: Array<Record<string, unknown>> = []
@@ -217,24 +214,22 @@ describe('fetchRow', () => {
       },
     }
 
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      body: createMockReadableStream(
-        JSON.stringify([
-          [
-            '42',
-            'hello',
-            '9007199254740993',
-            '12.34',
-            '2024-01-02',
-            '03:04:05',
-            '2024-01-02T03:04:05.123Z',
-            '2024-01-02T03:04:05.123',
-            '{"a":"1","b":{"c":"x","big":"9007199254740993","price":"56.78"}}',
-          ],
-        ])
-      ),
-    })
+    const payload = JSON.stringify([
+      [
+        '42',
+        'hello',
+        '9007199254740993',
+        '12.34',
+        '2024-01-02',
+        '03:04:05',
+        '2024-01-02T03:04:05.123Z',
+        '2024-01-02T03:04:05.123',
+        '{"a":"1","b":{"c":"x","big":"9007199254740993","price":"56.78"}}',
+      ],
+    ])
+
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse(payload))
     vi.stubGlobal('fetch', mockFetch)
 
     const rows = await fetchAll(complexExternalLinksResult, mockAuth, {
@@ -261,6 +256,61 @@ describe('fetchRow', () => {
         },
       },
     ])
+  })
+
+  it('should process external links across multiple chunks when only first link is present', async () => {
+    const partialLinksResult: StatementResult = {
+      statement_id: 'external-multi-chunk-test',
+      status: { state: 'SUCCEEDED' },
+      manifest: {
+        format: 'JSON_ARRAY',
+        schema: { column_count: 1, columns: [] },
+        total_chunk_count: 3,
+        total_row_count: 6,
+      },
+      result: {
+        external_links: [
+          createExternalLinkInfo({
+            chunk_index: 0,
+            row_offset: 0,
+            row_count: 2,
+            byte_count: 10,
+            external_link: 'https://mock/chunk0.json',
+          }),
+        ],
+      },
+    }
+
+    const links = [
+      createExternalLinkInfo({
+        chunk_index: 1,
+        row_offset: 2,
+        row_count: 2,
+        byte_count: 10,
+        external_link: 'https://mock/chunk1.json',
+      }),
+      createExternalLinkInfo({
+        chunk_index: 2,
+        row_offset: 4,
+        row_count: 2,
+        byte_count: 10,
+        external_link: 'https://mock/chunk2.json',
+      }),
+    ]
+
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(createGetChunkResponse([links[0]!], 1))
+      .mockResolvedValueOnce(createGetChunkResponse([links[1]!], 2))
+      .mockResolvedValueOnce(createStreamResponse('[["0"],["1"]]'))
+      .mockResolvedValueOnce(createStreamResponse('[["2"],["3"]]'))
+      .mockResolvedValueOnce(createStreamResponse('[["4"],["5"]]'))
+    vi.stubGlobal('fetch', mockFetch)
+
+    const rows = await fetchAll(partialLinksResult, mockAuth)
+
+    expect(rows).toHaveLength(6)
+    expect(rows[0]).toEqual(['0'])
+    expect(rows[5]).toEqual(['5'])
   })
 
   it('should abort when signal is aborted before processing', async () => {
@@ -319,9 +369,7 @@ describe('fetchRow', () => {
     }
 
     // Mock getChunk API calls
-    const mockFetch = vi
-      .fn()
-      // Chunk 1
+    const mockFetch = vi.fn()
       .mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -332,7 +380,6 @@ describe('fetchRow', () => {
             data_array: [['chunk1-row0'], ['chunk1-row1']],
           }),
       })
-      // Chunk 2
       .mockResolvedValueOnce({
         ok: true,
         json: () =>
@@ -373,23 +420,14 @@ describe('fetchRow', () => {
       },
     }
 
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      json: () =>
-        Promise.resolve({
-          chunk_index: 1,
-          external_links: [
-            {
-              chunk_index: 1,
-              external_link: 'https://mock/chunk1.json',
-              row_count: 10,
-              byte_count: 100,
-              row_offset: 1,
-              expiration: '2025-12-25T12:00:00Z',
-            },
-          ],
-        }),
+    const link = createExternalLinkInfo({
+      chunk_index: 1,
+      row_offset: 1,
+      row_count: 10,
+      byte_count: 100,
+      external_link: 'https://mock/chunk1.json',
     })
+    const mockFetch = vi.fn().mockResolvedValueOnce(createGetChunkResponse([link], 1))
     vi.stubGlobal('fetch', mockFetch)
 
     await expect(fetchRow(mixedResult, mockAuth)).rejects.toThrow(

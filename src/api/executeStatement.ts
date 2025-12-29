@@ -45,14 +45,16 @@ export async function executeStatement(
   options: ExecuteStatementOptions = {}
 ): Promise<StatementResult> {
   const warehouseId = options.warehouse_id ?? extractWarehouseId(auth.httpPath)
-  const { signal, onProgress, enableMetrics } = options
+  const { signal, onProgress, enableMetrics, logger } = options
+  const waitTimeout = options.wait_timeout ?? (onProgress ? '0s' : '50s')
+  let cancelIssued = false
 
   // Check if already aborted
   throwIfAborted(signal, 'executeStatement')
 
   // Helper to call onProgress with optional metrics
   const emitProgress = onProgress
-    ? async (statementId: string) => onProgress(result.status, enableMetrics ? await fetchMetrics(auth, statementId, signal) : undefined)
+    ? async (statementId: string) => onProgress(result, enableMetrics ? await fetchMetrics(auth, statementId, signal) : undefined)
     : undefined
 
   // 1. Build request (filter out undefined values)
@@ -64,7 +66,7 @@ export async function executeStatement(
       disposition: options.disposition,
       format: options.format,
       on_wait_timeout: options.on_wait_timeout ?? 'CONTINUE',
-      wait_timeout: options.wait_timeout ?? '50s',
+      wait_timeout: waitTimeout,
       row_limit: options.row_limit,
       catalog: options.catalog,
       schema: options.schema,
@@ -72,19 +74,47 @@ export async function executeStatement(
     }).filter(([, v]) => v !== undefined)
   ) as ExecuteStatementRequest
 
+  logger?.info?.(`executeStatement Executing statement on warehouse ${warehouseId}...`)
+
   // 2. Submit statement execution request
   let result = await postStatement(auth, request, signal)
+  const cancelStatementSafely = async () => {
+    if (cancelIssued) return
+    logger?.info?.('executeStatement Abort signal received during executeStatement.')
+    cancelIssued = true
+    await cancelStatement(auth, result.statement_id).catch((err) => {
+      logger?.error?.('executeStatement Failed to cancel statement after abort.', err)
+    })
+  }
 
-  // 3. Poll until terminal state
-  while (!TERMINAL_STATES.has(result.status.state)) {
-    if (signal?.aborted) {
-      await cancelStatement(auth, result.statement_id).catch(() => { })
+  if (signal?.aborted) {
+    await cancelStatementSafely()
+    throw new AbortError('Aborted during polling')
+  }
+
+  const onAbort = () => cancelStatementSafely().catch(() => { })
+
+  try {
+    signal?.addEventListener('abort', onAbort, { once: true })
+
+    // 3. Poll until terminal state
+    while (!TERMINAL_STATES.has(result.status.state)) {
+      logger?.info?.(`executeStatement Statement ${result.statement_id} in state ${result.status.state}; polling for status...`)
+      await emitProgress?.(result.statement_id)
+      await delay(POLL_INTERVAL_MS, signal)
+      result = await getStatement(auth, result.statement_id, signal)
+    }
+  } catch (err) {
+    if (err instanceof AbortError || signal?.aborted) {
+      logger?.info?.('executeStatement Abort detected in executeStatement polling loop.')
+      await cancelStatementSafely()
       throw new AbortError('Aborted during polling')
     }
-
-    await emitProgress?.(result.statement_id)
-    await delay(POLL_INTERVAL_MS, signal)
-    result = await getStatement(auth, result.statement_id, signal)
+    logger?.error?.(`executeStatement Error during executeStatement polling: ${String(err)}`)
+    throw err
+  } finally {
+    logger?.info?.(`executeStatement Statement ${result.statement_id} reached final state: ${result.status.state}`)
+    signal?.removeEventListener('abort', onAbort)
   }
 
   // 4. Final progress callback

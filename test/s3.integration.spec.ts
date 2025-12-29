@@ -1,13 +1,15 @@
-import { Readable } from 'node:stream'
+import { Readable, PassThrough } from 'node:stream'
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import {
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
-  PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3'
+import { Upload } from '@aws-sdk/lib-storage'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { createGzip } from 'node:zlib'
+import { pipeline } from 'node:stream/promises'
 // Load environment variables
 import 'dotenv/config'
 import { executeStatement, fetchAll, mergeExternalLinks } from '../src/index.js'
@@ -36,14 +38,6 @@ const shouldSkip =
 let s3Client: S3Client
 const uploadedKeys: string[] = []
 
-async function streamToBuffer(stream: Readable): Promise<Buffer> {
-  const chunks: Buffer[] = []
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
-  }
-  return Buffer.concat(chunks)
-}
-
 describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
   beforeAll(() => {
     s3Client = new S3Client({
@@ -68,9 +62,10 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
     }
   })
 
-  it.concurrent('captures JSON_ARRAY schema and data for complex types', async () => {
-    const result = await executeStatement(
-      `SELECT
+  describe.concurrent('executeStatement with complex types', () => {
+    it.concurrent('captures JSON_ARRAY schema and data for complex types', async () => {
+      const result = await executeStatement(
+        `SELECT
         42 AS num,
         'hello' AS str,
         CAST(9007199254740993 AS BIGINT) AS big_int,
@@ -92,118 +87,135 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
             CAST(56.78 AS DECIMAL(10, 2))
           )
         ) AS nested`,
-      auth,
-      { disposition: 'INLINE', format: 'JSON_ARRAY' }
-    )
+        auth,
+        { disposition: 'INLINE', format: 'JSON_ARRAY' }
+      )
 
-    expect(result.status.state).toBe('SUCCEEDED')
+      expect(result.status.state).toBe('SUCCEEDED')
 
-    const schema = result.manifest?.schema
-    const data = result.result?.data_array
+      const schema = result.manifest?.schema
+      const data = result.result?.data_array
 
-    expect(schema).toEqual({
-      column_count: 9,
-      columns: [
-        {
-          name: 'num',
-          type_text: 'INT',
-          type_name: 'INT',
-          position: 0,
-        },
-        {
-          name: 'str',
-          type_text: 'STRING',
-          type_name: 'STRING',
-          position: 1,
-        },
-        {
-          name: 'big_int',
-          type_text: 'BIGINT',
-          type_name: 'LONG',
-          position: 2,
-        },
-        {
-          name: 'price',
-          type_text: 'DECIMAL(10,2)',
-          type_name: 'DECIMAL',
-          position: 3,
-          type_precision: 10,
-          type_scale: 2,
-        },
-        {
-          name: 'd',
-          type_text: 'DATE',
-          type_name: 'DATE',
-          position: 4,
-        },
-        {
-          name: 't',
-          type_text: 'STRING',
-          type_name: 'STRING',
-          position: 5,
-        },
-        {
-          name: 'dt',
-          type_text: 'TIMESTAMP',
-          type_name: 'TIMESTAMP',
-          position: 6,
-        },
-        {
-          name: 'dt_ntz',
-          type_text: 'TIMESTAMP_NTZ',
-          type_name: 'TIMESTAMP_NTZ',
-          position: 7,
-        },
-        {
-          name: 'nested',
-          type_text:
-            'STRUCT<a: INT NOT NULL, b: STRUCT<c: STRING NOT NULL, big: BIGINT NOT NULL, price: DECIMAL(10,2) NOT NULL> NOT NULL>',
-          type_name: 'STRUCT',
-          position: 8,
-        },
-      ],
+      expect(schema).toEqual({
+        column_count: 9,
+        columns: [
+          {
+            name: 'num',
+            type_text: 'INT',
+            type_name: 'INT',
+            position: 0,
+          },
+          {
+            name: 'str',
+            type_text: 'STRING',
+            type_name: 'STRING',
+            position: 1,
+          },
+          {
+            name: 'big_int',
+            type_text: 'BIGINT',
+            type_name: 'LONG',
+            position: 2,
+          },
+          {
+            name: 'price',
+            type_text: 'DECIMAL(10,2)',
+            type_name: 'DECIMAL',
+            position: 3,
+            type_precision: 10,
+            type_scale: 2,
+          },
+          {
+            name: 'd',
+            type_text: 'DATE',
+            type_name: 'DATE',
+            position: 4,
+          },
+          {
+            name: 't',
+            type_text: 'STRING',
+            type_name: 'STRING',
+            position: 5,
+          },
+          {
+            name: 'dt',
+            type_text: 'TIMESTAMP',
+            type_name: 'TIMESTAMP',
+            position: 6,
+          },
+          {
+            name: 'dt_ntz',
+            type_text: 'TIMESTAMP_NTZ',
+            type_name: 'TIMESTAMP_NTZ',
+            position: 7,
+          },
+          {
+            name: 'nested',
+            type_text:
+              'STRUCT<a: INT NOT NULL, b: STRUCT<c: STRING NOT NULL, big: BIGINT NOT NULL, price: DECIMAL(10,2) NOT NULL> NOT NULL>',
+            type_name: 'STRUCT',
+            position: 8,
+          },
+        ],
+      })
+      expect(data).toEqual([
+        [
+          '42',
+          'hello',
+          '9007199254740993',
+          '12.34',
+          '2024-01-02',
+          '03:04:05',
+          '2024-01-02T03:04:05.123Z',
+          '2024-01-02T03:04:05.123',
+          '{"a":"1","b":{"c":"x","big":"9007199254740993","price":"56.78"}}',
+        ],
+      ])
     })
-    expect(data).toEqual([
-      [
-        '42',
-        'hello',
-        '9007199254740993',
-        '12.34',
-        '2024-01-02',
-        '03:04:05',
-        '2024-01-02T03:04:05.123Z',
-        '2024-01-02T03:04:05.123',
-        '{"a":"1","b":{"c":"x","big":"9007199254740993","price":"56.78"}}',
-      ],
-    ])
   })
 
   describe.concurrent('mergeExternalLinks with S3 upload', () => {
+    type UploadResult = MergeExternalLinksResult & { key: string }
+
     async function uploadToS3(
       stream: Readable,
       format: string
-    ): Promise<MergeExternalLinksResult> {
-      const buffer = await streamToBuffer(stream)
+    ): Promise<UploadResult> {
       const timestamp = Date.now()
       const ext = format === 'JSON_ARRAY' ? 'json' : format.toLowerCase()
       const key = `${S3_PREFIX}merged-${timestamp}.${ext}`
+      const gzip = createGzip()
+      const passThrough = new PassThrough()
 
       // Upload to S3
-      await s3Client.send(
-        new PutObjectCommand({
+      const upload = new Upload({
+        client: s3Client,
+        params: {
           Bucket: S3_BUCKET,
           Key: key,
-          Body: buffer,
+          Body: passThrough,
           ContentType:
             format === 'CSV'
-              ? 'text/csv'
+              ? 'text/csv; charset=utf-8'
               : format === 'JSON_ARRAY'
-                ? 'application/json'
+                ? 'application/json; charset=utf-8'
                 : 'application/vnd.apache.arrow.stream',
-        })
-      )
+          ContentEncoding: 'gzip',
+        },
+      })
+
+      await Promise.all([
+        pipeline(stream, gzip, passThrough),
+        upload.done(),
+      ])
 
       uploadedKeys.push(key)
+      const head = await s3Client.send(
+        new HeadObjectCommand({
+          Bucket: S3_BUCKET,
+          Key: key,
+        })
+      )
 
       // Generate presigned URL (valid for 1 hour)
       const presignedUrl = await getSignedUrl(
@@ -217,12 +229,13 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
 
       const expiration = new Date(Date.now() + 3600 * 1000).toISOString()
 
-      console.log(`Uploaded to s3://${S3_BUCKET}/${key} (${buffer.length} bytes)`)
+      console.log(`Uploaded to s3://${S3_BUCKET}/${key} (${head.ContentLength ?? 0} bytes)`)
 
       return {
         externalLink: presignedUrl,
-        byte_count: buffer.length,
+        byte_count: head.ContentLength ?? 0,
         expiration,
+        key,
       }
     }
 
@@ -247,9 +260,14 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
       }
 
       // Merge and upload to S3
+      let uploadedKey: string | null = null
       const mergedResult = await mergeExternalLinks(result, auth, {
         forceMerge: true,
-        mergeStreamToExternalLink: (stream) => uploadToS3(stream, 'CSV'),
+        mergeStreamToExternalLink: async (stream) => {
+          const uploadResult = await uploadToS3(stream, 'CSV')
+          uploadedKey = uploadResult.key
+          return uploadResult
+        },
       })
 
       // Verify merged result
@@ -370,9 +388,14 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
         return
       }
 
+      let uploadedKey: string | null = null
       const mergedResult = await mergeExternalLinks(result, auth, {
         forceMerge: true,
-        mergeStreamToExternalLink: (stream) => uploadToS3(stream, 'CSV'),
+        mergeStreamToExternalLink: async (stream) => {
+          const uploadResult = await uploadToS3(stream, 'CSV')
+          uploadedKey = uploadResult.key
+          return uploadResult
+        },
       })
 
       expect(mergedResult.manifest?.total_chunk_count).toBe(1)
@@ -382,7 +405,9 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
       console.log(`Merged and uploaded ${uploadedSize} bytes to S3`)
 
       // Verify the S3 object exists
-      const key = uploadedKeys[uploadedKeys.length - 1]
+      const key = uploadedKey
+      if (!key)
+        throw new Error('No uploaded key available for head check')
       const headResponse = await s3Client.send(
         new HeadObjectCommand({
           Bucket: S3_BUCKET,
@@ -494,22 +519,54 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
         },
       ])
     })
+
+    it.concurrent('fetches all rows across multiple external link chunks', async () => {
+      const result = await executeStatement(
+        `SELECT
+          id,
+          repeat('x', 5000) AS payload
+        FROM range(10000)`,
+        auth,
+        { disposition: 'EXTERNAL_LINKS', format: 'JSON_ARRAY' }
+      )
+
+      expect(result.status.state).toBe('SUCCEEDED')
+      expect(result.manifest?.total_row_count).toBe(10000)
+      expect(result.manifest?.total_chunk_count).toBeGreaterThan(1)
+
+      const rows = await fetchAll(result, auth)
+      expect(rows).toHaveLength(10000)
+
+      const firstRow = rows[0] as string[]
+      const lastRow = rows[rows.length - 1] as string[]
+      expect(firstRow[0]).toBe('0')
+      expect(lastRow[0]).toBe('9999')
+      expect(firstRow[1]?.length).toBe(5000)
+    }, 300000)
   })
 
   describe.concurrent('S3 client operations', () => {
     it.concurrent('can upload and download from S3', async () => {
       const testData = 'Hello, Databricks SQL!'
       const key = `${S3_PREFIX}test-${Date.now()}.txt`
+      const passThrough = new PassThrough()
+      const gzip = createGzip()
 
       // Upload
-      await s3Client.send(
-        new PutObjectCommand({
+      const upload = new Upload({
+        client: s3Client,
+        params: {
           Bucket: S3_BUCKET,
           Key: key,
-          Body: testData,
-          ContentType: 'text/plain',
-        })
-      )
+          Body: passThrough,
+          ContentType: 'text/plain; charset=utf-8',
+          ContentEncoding: 'gzip',
+        },
+      })
+      await Promise.all([
+        pipeline(Readable.from([testData]), gzip, passThrough),
+        upload.done(),
+      ])
       uploadedKeys.push(key)
 
       // Generate presigned URL
