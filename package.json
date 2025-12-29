@@ -1,6 +1,6 @@
 {
   "name": "@bitofsky/databricks-sql",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Databricks SQL client for Node.js - Direct REST API without SDK",
   "main": "dist/index.cjs",
   "module": "dist/index.js",

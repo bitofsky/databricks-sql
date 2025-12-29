@@ -209,6 +209,8 @@ function fetchRow(
 ```
 - Streams each row to `options.onEachRow`.
 - Use `format: 'JSON_OBJECT'` to map rows into schema-based objects.
+- Use `encodeBigInt` to customize BIGINT/LONG conversions when using `JSON_OBJECT`.
+- Use `encodeTimestamp` to customize TIMESTAMP* conversions when using `JSON_OBJECT`.
 - Supports `INLINE` results or `JSON_ARRAY` formatted `EXTERNAL_LINKS` only.
 - If only a subset of external links is returned, missing chunk metadata is fetched by index.
 
@@ -274,15 +276,19 @@ type ExecuteStatementOptions = {
 
 type FetchRowsOptions = {
   signal?: AbortSignal
-  onEachRow?: (row: RowArray | RowObject) => void
   format?: 'JSON_ARRAY' | 'JSON_OBJECT'
   logger?: Logger
+  onEachRow?: (row: RowArray | RowObject) => void
+  encodeBigInt?: (value: bigint) => unknown
+  encodeTimestamp?: (value: string) => unknown
 }
 
 type FetchAllOptions = {
   signal?: AbortSignal
   format?: 'JSON_ARRAY' | 'JSON_OBJECT'
   logger?: Logger
+  encodeBigInt?: (value: bigint) => unknown
+  encodeTimestamp?: (value: string) => unknown
 }
 
 type FetchStreamOptions = {

@@ -4,6 +4,7 @@ import type {
   FetchRowsOptions,
   RowArray,
   RowObject,
+  RowMapperOptions,
   StatementManifest,
 } from './types.js'
 
@@ -30,12 +31,10 @@ const INTEGER_TYPES = new Set(['TINYINT', 'SMALLINT', 'INT'])
 const BIGINT_TYPES = new Set(['BIGINT', 'LONG'])
 const FLOAT_TYPES = new Set(['FLOAT', 'DOUBLE'])
 const BOOLEAN_TYPES = new Set(['BOOLEAN'])
+const TIMESTAMP_TYPES = new Set(['TIMESTAMP', 'TIMESTAMP_NTZ', 'TIMESTAMP_LTZ'])
 const STRING_TYPES = new Set([
   'STRING',
   'DATE',
-  'TIMESTAMP',
-  'TIMESTAMP_NTZ',
-  'TIMESTAMP_LTZ',
   'TIME',
 ])
 
@@ -46,7 +45,8 @@ const STRING_TYPES = new Set([
  */
 export function createRowMapper(
   manifest: StatementManifest,
-  format: FetchRowsOptions['format']
+  format: FetchRowsOptions['format'],
+  options: RowMapperOptions = {}
 ): RowMapper {
   if (format !== 'JSON_OBJECT')
     return (row) => row
@@ -54,7 +54,7 @@ export function createRowMapper(
   // Precompute per-column converters for fast row mapping.
   const columnConverters = manifest.schema.columns.map((column: ColumnInfo) => ({
     name: column.name,
-    convert: createColumnConverter(column),
+    convert: createColumnConverter(column, options),
   }))
 
   return (row) => {
@@ -72,9 +72,12 @@ export function createRowMapper(
   }
 }
 
-function createColumnConverter(column: ColumnInfo): (value: unknown) => unknown {
+function createColumnConverter(
+  column: ColumnInfo,
+  options: RowMapperOptions
+): (value: unknown) => unknown {
   const descriptor = parseColumnType(column)
-  return (value) => convertValue(descriptor, value)
+  return (value) => convertValue(descriptor, value, options)
 }
 
 function parseColumnType(column: ColumnInfo): TypeDescriptor {
@@ -255,19 +258,23 @@ function stripNotNull(typeText: string): string {
   return trimmed
 }
 
-function convertValue(descriptor: TypeDescriptor, value: unknown): unknown {
+function convertValue(
+  descriptor: TypeDescriptor,
+  value: unknown,
+  options: RowMapperOptions
+): unknown {
   if (value === null || value === undefined)
     return value
 
   if (descriptor.typeName === 'STRUCT' && descriptor.fields)
     // STRUCT values are JSON strings in JSON_ARRAY format.
-    return convertStructValue(descriptor.fields, value)
+    return convertStructValue(descriptor.fields, value, options)
 
   if (descriptor.typeName === 'ARRAY' && descriptor.elementType)
-    return convertArrayValue(descriptor.elementType, value)
+    return convertArrayValue(descriptor.elementType, value, options)
 
   if (descriptor.typeName === 'MAP' && descriptor.keyType && descriptor.valueType)
-    return convertMapValue(descriptor.keyType, descriptor.valueType, value)
+    return convertMapValue(descriptor.keyType, descriptor.valueType, value, options)
 
   if (descriptor.typeName === 'DECIMAL')
     return convertNumber(value)
@@ -276,7 +283,7 @@ function convertValue(descriptor: TypeDescriptor, value: unknown): unknown {
     return convertNumber(value)
 
   if (BIGINT_TYPES.has(descriptor.typeName))
-    return convertInteger(value)
+    return convertInteger(value, options.encodeBigInt)
 
   if (FLOAT_TYPES.has(descriptor.typeName))
     return convertNumber(value)
@@ -284,13 +291,20 @@ function convertValue(descriptor: TypeDescriptor, value: unknown): unknown {
   if (BOOLEAN_TYPES.has(descriptor.typeName))
     return convertBoolean(value)
 
+  if (TIMESTAMP_TYPES.has(descriptor.typeName))
+    return convertTimestamp(value, options.encodeTimestamp)
+
   if (STRING_TYPES.has(descriptor.typeName))
     return value
 
   return value
 }
 
-function convertStructValue(fields: StructField[], value: unknown): unknown {
+function convertStructValue(
+  fields: StructField[],
+  value: unknown,
+  options: RowMapperOptions
+): unknown {
   const raw = parseStructValue(value)
   if (!raw || typeof raw !== 'object' || Array.isArray(raw))
     return value
@@ -298,23 +312,28 @@ function convertStructValue(fields: StructField[], value: unknown): unknown {
   // Apply nested field conversions based on the parsed STRUCT schema.
   const mapped: RowObject = {}
   for (const field of fields)
-    mapped[field.name] = convertValue(field.type, (raw as RowObject)[field.name])
+    mapped[field.name] = convertValue(field.type, (raw as RowObject)[field.name], options)
 
   return mapped
 }
 
-function convertArrayValue(elementType: TypeDescriptor, value: unknown): unknown {
+function convertArrayValue(
+  elementType: TypeDescriptor,
+  value: unknown,
+  options: RowMapperOptions
+): unknown {
   const raw = parseJsonValue(value)
   if (!Array.isArray(raw))
     return value
 
-  return raw.map((entry) => convertValue(elementType, entry))
+  return raw.map((entry) => convertValue(elementType, entry, options))
 }
 
 function convertMapValue(
   keyType: TypeDescriptor,
   valueType: TypeDescriptor,
-  value: unknown
+  value: unknown,
+  options: RowMapperOptions
 ): unknown {
   const raw = parseJsonValue(value)
   if (!raw || typeof raw !== 'object')
@@ -325,16 +344,16 @@ function convertMapValue(
     for (const entry of raw) {
       if (!Array.isArray(entry) || entry.length < 2)
         continue
-      const convertedKey = convertValue(keyType, entry[0])
-      mapped[String(convertedKey)] = convertValue(valueType, entry[1])
+      const convertedKey = convertValue(keyType, entry[0], options)
+      mapped[String(convertedKey)] = convertValue(valueType, entry[1], options)
     }
     return mapped
   }
 
   const mapped: RowObject = {}
   for (const [key, entryValue] of Object.entries(raw)) {
-    const convertedKey = convertValue(keyType, key)
-    mapped[String(convertedKey)] = convertValue(valueType, entryValue)
+    const convertedKey = convertValue(keyType, key, options)
+    mapped[String(convertedKey)] = convertValue(valueType, entryValue, options)
   }
 
   return mapped
@@ -372,26 +391,39 @@ function convertNumber(value: unknown): unknown {
   return value
 }
 
-function convertInteger(value: unknown): unknown {
+function convertInteger(value: unknown, encodeBigInt?: (value: bigint) => unknown): unknown {
   if (typeof value === 'bigint')
-    return value
+    return encodeBigInt ? encodeBigInt(value) : value
 
   if (typeof value === 'number') {
-    if (Number.isInteger(value))
-      return BigInt(value)
+    if (Number.isInteger(value)) {
+      const bigintValue = BigInt(value)
+      return encodeBigInt ? encodeBigInt(bigintValue) : bigintValue
+    }
     return value
   }
 
   if (typeof value === 'string') {
     try {
       // Preserve integer semantics for BIGINT/DECIMAL(scale=0) by returning bigint.
-      return BigInt(value)
+      const bigintValue = BigInt(value)
+      return encodeBigInt ? encodeBigInt(bigintValue) : bigintValue
     } catch {
       return value
     }
   }
 
   return value
+}
+
+function convertTimestamp(
+  value: unknown,
+  encodeTimestamp?: (value: string) => unknown
+): unknown {
+  if (typeof value !== 'string')
+    return value
+
+  return encodeTimestamp ? encodeTimestamp(value) : value
 }
 
 function convertBoolean(value: unknown): unknown {

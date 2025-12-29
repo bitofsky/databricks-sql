@@ -30,7 +30,10 @@ export async function fetchRow(
   const statementId = statementResult.statement_id
   const logContext = { statementId, manifest, requestedFormat: format }
   // Map JSON_ARRAY rows to JSON_OBJECT when requested.
-  const mapRow = createRowMapper(manifest, format)
+  const mapRow = createRowMapper(manifest, format, {
+    ...options.encodeBigInt ? { encodeBigInt: options.encodeBigInt } : {},
+    ...options.encodeTimestamp ? { encodeTimestamp: options.encodeTimestamp } : {},
+  })
 
   logger?.info?.(`fetchRow fetching rows for statement ${statementId}.`, {
     ...logContext,

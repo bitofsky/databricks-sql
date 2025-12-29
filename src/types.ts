@@ -235,6 +235,14 @@ export type RowArray = unknown[]
 /** Row data as JSON object */
 export type RowObject = Record<string, unknown>
 
+/** Options for row mapping */
+export type RowMapperOptions = {
+  /** Hook to transform bigint values (e.g., to string or number) */
+  encodeBigInt?: (value: bigint) => unknown
+  /** Hook to transform timestamp-like values (e.g., to Date) */
+  encodeTimestamp?: (value: string) => unknown
+}
+
 /** Format for fetchRow/fetchAll */
 export type FetchRowFormat = 'JSON_ARRAY' | 'JSON_OBJECT'
 
@@ -248,12 +256,16 @@ export type FetchStreamOptions = SignalOptions & {
 
 /** Options for fetchRow */
 export type FetchRowsOptions = SignalOptions & {
-  /** Callback for each row */
-  onEachRow?: (row: RowArray | RowObject) => void
   /** Row format (default: JSON_ARRAY) */
   format?: FetchRowFormat
   /** Optional logger for lifecycle events */
   logger?: Logger
+  /** Callback for each row */
+  onEachRow?: (row: RowArray | RowObject) => void
+  /** Customize bigint conversion for JSON_OBJECT rows */
+  encodeBigInt?: RowMapperOptions['encodeBigInt']
+  /** Customize TIMESTAMP* conversion for JSON_OBJECT rows */
+  encodeTimestamp?: RowMapperOptions['encodeTimestamp']
 }
 
 /** Options for fetchAll */
@@ -262,6 +274,10 @@ export type FetchAllOptions = SignalOptions & {
   format?: FetchRowFormat
   /** Optional logger for lifecycle events */
   logger?: Logger
+  /** Customize bigint conversion for JSON_OBJECT rows */
+  encodeBigInt?: RowMapperOptions['encodeBigInt']
+  /** Customize TIMESTAMP* conversion for JSON_OBJECT rows */
+  encodeTimestamp?: RowMapperOptions['encodeTimestamp']
 }
 
 /** Result from mergeStreamToExternalLink callback */

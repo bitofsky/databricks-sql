@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { createRowMapper } from '../src/createRowMapper.js'
-import type { FetchRowsOptions, StatementManifest } from '../src/types.js'
+import type { FetchRowsOptions, RowMapperOptions, StatementManifest } from '../src/types.js'
 
 type Column = StatementManifest['schema']['columns'][number]
 
@@ -23,10 +23,11 @@ function buildManifest(columns: Column[]): StatementManifest {
 function mapRow(
   columns: Column[],
   row: unknown[],
-  format: FetchRowsOptions['format'] = 'JSON_OBJECT'
+  format: FetchRowsOptions['format'] = 'JSON_OBJECT',
+  options?: RowMapperOptions
 ) {
   const manifest = buildManifest(columns)
-  const mapper = createRowMapper(manifest, format)
+  const mapper = createRowMapper(manifest, format, options)
   return mapper(row)
 }
 
@@ -50,6 +51,21 @@ describe('createRowMapper', () => {
       int_col: 42,
       big_small: 7n,
       big_col: 9007199254740993n,
+    })
+  })
+
+  it('applies encodeBigInt to bigint values', () => {
+    const columns: Column[] = [
+      { name: 'big_col', type_text: 'BIGINT', type_name: 'BIGINT', position: 0 },
+      { name: 'nested', type_text: 'STRUCT<inner: BIGINT>', type_name: 'STRUCT', position: 1 },
+    ]
+    const row = ['9007199254740993', '{"inner":"42"}']
+    const options: RowMapperOptions = {
+      encodeBigInt: (value) => value.toString(),
+    }
+    expect(mapRow(columns, row, 'JSON_OBJECT', options)).toEqual({
+      big_col: '9007199254740993',
+      nested: { inner: '42' },
     })
   })
 
@@ -88,6 +104,30 @@ describe('createRowMapper', () => {
       t: '03:04:05',
       ts: '2024-01-02T03:04:05.123Z',
       ts_ntz: '2024-01-02T03:04:05.123',
+    })
+  })
+
+  it('applies encodeTimestamp to TIMESTAMP types only', () => {
+    const columns: Column[] = [
+      { name: 'd', type_text: 'DATE', type_name: 'DATE', position: 0 },
+      { name: 't', type_text: 'TIME', type_name: 'TIME', position: 1 },
+      { name: 'ts', type_text: 'TIMESTAMP', type_name: 'TIMESTAMP', position: 2 },
+      { name: 'ts_ltz', type_text: 'TIMESTAMP_LTZ', type_name: 'TIMESTAMP_LTZ', position: 3 },
+    ]
+    const row = [
+      '2024-01-02',
+      '03:04:05',
+      '2024-01-02T03:04:05.123Z',
+      '2024-01-02T03:04:05.123Z',
+    ]
+    const options: RowMapperOptions = {
+      encodeTimestamp: (value) => `ts:${value}`,
+    }
+    expect(mapRow(columns, row, 'JSON_OBJECT', options)).toEqual({
+      d: '2024-01-02',
+      t: '03:04:05',
+      ts: 'ts:2024-01-02T03:04:05.123Z',
+      ts_ltz: 'ts:2024-01-02T03:04:05.123Z',
     })
   })
 

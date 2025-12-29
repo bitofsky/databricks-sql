@@ -41,6 +41,12 @@ export async function fetchAll(
   if (options.logger)
     fetchOptions.logger = options.logger
 
+  if (options.encodeBigInt)
+    fetchOptions.encodeBigInt = options.encodeBigInt
+
+  if (options.encodeTimestamp)
+    fetchOptions.encodeTimestamp = options.encodeTimestamp
+
   await fetchRow(statementResult, auth, fetchOptions)
   logger?.info?.(`fetchAll fetched ${rows.length} rows for statement ${statementId}.`, {
     ...logContext,
