@@ -90,7 +90,6 @@ describe('executeStatement', () => {
         body: expect.stringContaining('"wait_timeout":"0s"'),
       })
     )
-    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'PENDING' } }), undefined)
     expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'SUCCEEDED' } }), undefined)
   })
 
@@ -116,7 +115,7 @@ describe('executeStatement', () => {
     // Only 2 calls: postStatement + getStatement (no metrics calls)
     expect(mockFetch).toHaveBeenCalledTimes(2)
     // onProgress should be called without metrics
-    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'PENDING' } }), undefined)
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'SUCCEEDED' } }), undefined)
   })
 
   it('should fetch metrics when enableMetrics is true', async () => {
@@ -127,15 +126,15 @@ describe('executeStatement', () => {
         ok: true,
         json: () => Promise.resolve(mockPendingResult),
       })
-      // getQueryMetrics (during polling)
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockQueryInfo),
-      })
       // getStatement
       .mockResolvedValueOnce({
         ok: true,
         json: () => Promise.resolve(mockSucceededAfterPolling),
+      })
+      // getQueryMetrics (during polling)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockQueryInfo),
       })
       // getQueryMetrics (final)
       .mockResolvedValueOnce({
@@ -153,17 +152,9 @@ describe('executeStatement', () => {
     await vi.advanceTimersByTimeAsync(5000)
     await resultPromise
 
-    // 4 calls: postStatement + getQueryMetrics + getStatement + getQueryMetrics
+    // 4 calls: postStatement + getStatement + getQueryMetrics + getQueryMetrics
     expect(mockFetch).toHaveBeenCalledTimes(4)
 
-    // Check that onProgress was called with metrics
-    expect(onProgress).toHaveBeenCalledWith(
-      expect.objectContaining({ status: { state: 'PENDING' } }),
-      expect.objectContaining({
-        total_time_ms: 959,
-        execution_time_ms: 642,
-      })
-    )
     expect(onProgress).toHaveBeenCalledWith(
       expect.objectContaining({ status: { state: 'SUCCEEDED' } }),
       expect.objectContaining({
@@ -180,17 +171,17 @@ describe('executeStatement', () => {
         ok: true,
         json: () => Promise.resolve(mockPendingResult),
       })
-      // getQueryMetrics fails (401 - no retry)
+      // getStatement
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockSucceededAfterPolling),
+      })
+      // getQueryMetrics fails again (401 - no retry)
       .mockResolvedValueOnce({
         ok: false,
         status: 401,
         statusText: 'Unauthorized',
         text: () => Promise.resolve('Unauthorized'),
-      })
-      // getStatement
-      .mockResolvedValueOnce({
-        ok: true,
-        json: () => Promise.resolve(mockSucceededAfterPolling),
       })
       // getQueryMetrics fails again (401 - no retry)
       .mockResolvedValueOnce({
@@ -213,7 +204,7 @@ describe('executeStatement', () => {
     // Statement should still succeed even if metrics fail
     expect(result.status.state).toBe('SUCCEEDED')
     // onProgress should be called without metrics (undefined)
-    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'PENDING' } }), undefined)
+    expect(onProgress).toHaveBeenCalledWith(expect.objectContaining({ status: { state: 'SUCCEEDED' } }), undefined)
   })
 
   it('should throw DatabricksSqlError when statement fails', async () => {

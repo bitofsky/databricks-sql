@@ -27,13 +27,8 @@ async function fetchMetrics(
   statementId: string,
   signal?: AbortSignal
 ): Promise<QueryMetrics | undefined> {
-  try {
-    const queryInfo = await getQueryMetrics(auth, statementId, signal)
-    return queryInfo.metrics
-  } catch {
-    // Ignore metrics fetch errors - non-critical
-    return undefined
-  }
+  const queryInfo = await getQueryMetrics(auth, statementId, signal)
+  return queryInfo.metrics
 }
 
 /**
@@ -54,7 +49,13 @@ export async function executeStatement(
 
   // Helper to call onProgress with optional metrics
   const emitProgress = onProgress
-    ? async (statementId: string) => onProgress(result, enableMetrics ? await fetchMetrics(auth, statementId, signal) : undefined)
+    ? async () => result ? onProgress(
+      result,
+      enableMetrics ? await fetchMetrics(auth, result.statement_id, signal).catch(e => {
+        logger?.error?.(`executeStatement Failed to fetch query metrics for statement ${result?.statement_id}: ${String(e)}`, { statementId: result?.statement_id })
+        return undefined
+      }) : undefined
+    ) : undefined
     : undefined
 
   // 1. Build request (filter out undefined values)
@@ -100,9 +101,9 @@ export async function executeStatement(
     // 3. Poll until terminal state
     while (!TERMINAL_STATES.has(result.status.state)) {
       logger?.info?.(`executeStatement Statement ${result.statement_id} in state ${result.status.state}; polling for status...`)
-      await emitProgress?.(result.statement_id)
       await delay(POLL_INTERVAL_MS, signal)
       result = await getStatement(auth, result.statement_id, signal)
+      await emitProgress?.()
     }
   } catch (err) {
     if (err instanceof AbortError || signal?.aborted) {
@@ -118,7 +119,7 @@ export async function executeStatement(
   }
 
   // 4. Final progress callback
-  await emitProgress?.(result.statement_id)
+  await emitProgress?.()
 
   // 5. Handle terminal states
   if (result.status.state === 'SUCCEEDED')
