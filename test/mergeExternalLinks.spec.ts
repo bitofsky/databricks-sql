@@ -7,25 +7,14 @@ import {
   mockInlineResult,
   mockExternalLinkData,
 } from './mocks.js'
-import { createMockReadableStream, collectStream } from './testUtil.js'
+import { collectStream, createStreamResponse } from './testUtil.js'
 
 describe('mergeExternalLinks', () => {
   afterEach(() => {
     vi.restoreAllMocks()
   })
 
-  it('should return original for inline data', async () => {
-    const mockCallback = vi.fn()
-
-    const result = await mergeExternalLinks(mockInlineResult, mockAuth, {
-      mergeStreamToExternalLink: mockCallback,
-    })
-
-    expect(result).toBe(mockInlineResult)
-    expect(mockCallback).not.toHaveBeenCalled()
-  })
-
-  it('should return original for empty result', async () => {
+  it('should return original for inline data and empty result', async () => {
     const emptyResult: StatementResult = {
       statement_id: 'empty-test',
       status: { state: 'SUCCEEDED' },
@@ -37,19 +26,21 @@ describe('mergeExternalLinks', () => {
     }
     const mockCallback = vi.fn()
 
-    const result = await mergeExternalLinks(emptyResult, mockAuth, {
+    const inlineResult = await mergeExternalLinks(mockInlineResult, mockAuth, {
+      mergeStreamToExternalLink: mockCallback,
+    })
+    const emptyResultResponse = await mergeExternalLinks(emptyResult, mockAuth, {
       mergeStreamToExternalLink: mockCallback,
     })
 
-    expect(result).toBe(emptyResult)
+    expect(inlineResult).toBe(mockInlineResult)
+    expect(emptyResultResponse).toBe(emptyResult)
     expect(mockCallback).not.toHaveBeenCalled()
   })
 
   it('should merge external links and return updated StatementResult', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      body: createMockReadableStream(JSON.stringify(mockExternalLinkData)),
-    })
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse(JSON.stringify(mockExternalLinkData)))
     vi.stubGlobal('fetch', mockFetch)
 
     const uploadResult: MergeExternalLinksResult = {
@@ -94,10 +85,8 @@ describe('mergeExternalLinks', () => {
   })
 
   it('should pass merged stream to callback', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      body: createMockReadableStream(JSON.stringify(mockExternalLinkData)),
-    })
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse(JSON.stringify(mockExternalLinkData)))
     vi.stubGlobal('fetch', mockFetch)
 
     let receivedData: string | undefined
@@ -125,15 +114,11 @@ describe('mergeExternalLinks', () => {
 
   it('should handle abort signal', async () => {
     const controller = new AbortController()
-
     const mockFetch = vi.fn().mockImplementation(
       () =>
         new Promise((resolve) => {
           setTimeout(() => {
-            resolve({
-              ok: true,
-              body: createMockReadableStream('[]'),
-            })
+            resolve(createStreamResponse(JSON.stringify(mockExternalLinkData)))
           }, 1000)
         })
     )
@@ -162,10 +147,8 @@ describe('mergeExternalLinks', () => {
   })
 
   it('should propagate callback errors', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      body: createMockReadableStream('[]'),
-    })
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse('[]'))
     vi.stubGlobal('fetch', mockFetch)
 
     const mockCallback = vi.fn().mockRejectedValue(new Error('Upload failed'))
@@ -179,10 +162,8 @@ describe('mergeExternalLinks', () => {
   })
 
   it('should preserve original manifest properties', async () => {
-    const mockFetch = vi.fn().mockResolvedValueOnce({
-      ok: true,
-      body: createMockReadableStream('[]'),
-    })
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(createStreamResponse('[]'))
     vi.stubGlobal('fetch', mockFetch)
 
     const uploadResult: MergeExternalLinksResult = {

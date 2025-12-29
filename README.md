@@ -23,6 +23,7 @@ The goal is simple: stream big results with stable memory usage and without forc
 - Optimized polling with server-side wait (up to 50s) before falling back to client polling.
 - Query metrics support via Query History API (`enableMetrics` option).
 - Efficient external link handling: merge chunks into a single stream.
+- Handles partial external link responses by fetching missing chunk metadata.
 - `mergeExternalLinks` supports streaming uploads and returns a new StatementResult with a presigned URL.
 - `fetchRow`/`fetchAll` support `JSON_OBJECT` (schema-based row mapping).
 - External links + JSON_ARRAY are supported for row iteration (streaming JSON parsing).
@@ -48,11 +49,12 @@ console.log(rows) // [{ value: 1 }]
 ```
 
 ## Sample (Streaming + Presigned URL)
-Stream external links into S3 with gzip compression, then return a single presigned URL:
+Stream external links into S3 with gzip compression, then return a single presigned URL.
 
 ```ts
 import { executeStatement, mergeExternalLinks } from '@bitofsky/databricks-sql'
-import { GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { GetObjectCommand, HeadObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { Upload } from '@aws-sdk/lib-storage'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { createGzip } from 'zlib'
 import { pipeline } from 'stream/promises'
@@ -79,15 +81,17 @@ const merged = await mergeExternalLinks(result, auth, {
     const gzip = createGzip() // Compress with gzip and upload to S3
     const passThrough = new PassThrough()
 
-    const uploadPromise = s3.send(
-      new PutObjectCommand({
+    const upload = new Upload({
+      client: s3,
+      params: {
         Bucket: bucket,
         Key: key,
         Body: passThrough,
-        ContentType: 'text/csv',
+        ContentType: 'text/csv; charset=utf-8',
         ContentEncoding: 'gzip',
-      })
-    )
+      },
+    })
+    const uploadPromise = upload.done()
 
     await Promise.all([
       pipeline(stream, gzip, passThrough),
@@ -128,8 +132,8 @@ const result = await executeStatement(
   auth,
   {
     enableMetrics: true,
-    onProgress: (status, metrics) => {
-      console.log(`State: ${status.state}`)
+    onProgress: (result, metrics) => {
+      console.log(`State: ${result.status.state}`)
       if (metrics) {  // metrics is optional, only present when enableMetrics: true
         console.log(`  Execution time: ${metrics.execution_time_ms}ms`)
         console.log(`  Rows produced: ${metrics.rows_produced_count}`)
@@ -190,6 +194,7 @@ function executeStatement(
 ```
 - Calls the Databricks Statement Execution API and polls until completion.
 - Server waits up to 50s (`wait_timeout`) before client-side polling begins.
+- Default `wait_timeout` is `50s`, or `0s` when `onProgress` is provided.
 - Use `options.onProgress` to receive status updates with optional metrics.
 - Set `enableMetrics: true` to fetch query metrics from Query History API on each poll.
 - Throws `DatabricksSqlError` on failure, `StatementCancelledError` on cancel, and `AbortError` on abort.
@@ -205,6 +210,7 @@ function fetchRow(
 - Streams each row to `options.onEachRow`.
 - Use `format: 'JSON_OBJECT'` to map rows into schema-based objects.
 - Supports `INLINE` results or `JSON_ARRAY` formatted `EXTERNAL_LINKS` only.
+- If only a subset of external links is returned, missing chunk metadata is fetched by index.
 
 ### fetchAll(statementResult, auth, options?)
 ```ts
@@ -216,6 +222,7 @@ function fetchAll(
 ```
 - Collects all rows into an array. For large results, prefer `fetchRow`/`fetchStream`.
 - Supports `INLINE` results or `JSON_ARRAY` formatted `EXTERNAL_LINKS` only.
+- If only a subset of external links is returned, missing chunk metadata is fetched by index.
 
 ### fetchStream(statementResult, auth, options?)
 ```ts
@@ -230,6 +237,7 @@ function fetchStream(
 - Throws if the result is `INLINE`.
 - Ends as an empty stream when no external links exist.
 - `forceMerge: true` forces merge even when there is only a single external link.
+- If only a subset of external links is returned, missing chunk metadata is fetched by index.
 
 ### mergeExternalLinks(statementResult, auth, options)
 ```ts
@@ -248,8 +256,9 @@ function mergeExternalLinks(
 ### Options (Summary)
 ```ts
 type ExecuteStatementOptions = {
-  onProgress?: (status: StatementStatus, metrics?: QueryMetrics) => void
+  onProgress?: (result: StatementResult, metrics?: QueryMetrics) => void
   enableMetrics?: boolean      // Fetch metrics from Query History API (default: false)
+  logger?: Logger
   signal?: AbortSignal
   disposition?: 'INLINE' | 'EXTERNAL_LINKS'
   format?: 'JSON_ARRAY' | 'ARROW_STREAM' | 'CSV'
@@ -267,21 +276,25 @@ type FetchRowsOptions = {
   signal?: AbortSignal
   onEachRow?: (row: RowArray | RowObject) => void
   format?: 'JSON_ARRAY' | 'JSON_OBJECT'
+  logger?: Logger
 }
 
 type FetchAllOptions = {
   signal?: AbortSignal
   format?: 'JSON_ARRAY' | 'JSON_OBJECT'
+  logger?: Logger
 }
 
 type FetchStreamOptions = {
   signal?: AbortSignal
   forceMerge?: boolean
+  logger?: Logger
 }
 
 type MergeExternalLinksOptions = {
   signal?: AbortSignal
   forceMerge?: boolean
+  logger?: Logger
   mergeStreamToExternalLink: (stream: Readable) => Promise<{
     externalLink: string
     byte_count: number

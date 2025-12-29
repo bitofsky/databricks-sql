@@ -188,7 +188,9 @@ export type StatementParameter = {
  */
 export type ExecuteStatementOptions = {
   /** Progress callback (called on each poll) */
-  onProgress?: (status: StatementStatus, metrics?: QueryMetrics) => void
+  onProgress?: (result: StatementResult, metrics?: QueryMetrics) => void
+  /** Optional logger for lifecycle events */
+  logger?: Logger
   /** Enable query metrics fetching during polling (default: false) */
   enableMetrics?: boolean
   /** Abort signal for cancellation */
@@ -215,6 +217,12 @@ export type ExecuteStatementOptions = {
   warehouse_id?: string
 }
 
+export type Logger = {
+  info?: (...args: unknown[]) => void
+  warn?: (...args: unknown[]) => void
+  error?: (...args: unknown[]) => void
+}
+
 /** Base options with abort signal support */
 export type SignalOptions = {
   /** Abort signal for cancellation */
@@ -234,6 +242,8 @@ export type FetchRowFormat = 'JSON_ARRAY' | 'JSON_OBJECT'
 export type FetchStreamOptions = SignalOptions & {
   /** Force merge even when there is only a single external link */
   forceMerge?: boolean
+  /** Optional logger for lifecycle events */
+  logger?: Logger
 }
 
 /** Options for fetchRow */
@@ -242,12 +252,16 @@ export type FetchRowsOptions = SignalOptions & {
   onEachRow?: (row: RowArray | RowObject) => void
   /** Row format (default: JSON_ARRAY) */
   format?: FetchRowFormat
+  /** Optional logger for lifecycle events */
+  logger?: Logger
 }
 
 /** Options for fetchAll */
 export type FetchAllOptions = SignalOptions & {
   /** Row format (default: JSON_ARRAY) */
   format?: FetchRowFormat
+  /** Optional logger for lifecycle events */
+  logger?: Logger
 }
 
 /** Result from mergeStreamToExternalLink callback */
@@ -266,6 +280,8 @@ export type MergeExternalLinksOptions = SignalOptions & {
   mergeStreamToExternalLink: (stream: Readable) => Promise<MergeExternalLinksResult>
   /** Force merge even when there is only a single external link chunk */
   forceMerge?: boolean
+  /** Optional logger for lifecycle events */
+  logger?: Logger
 }
 
 /**

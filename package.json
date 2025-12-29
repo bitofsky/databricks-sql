@@ -1,6 +1,6 @@
 {
   "name": "@bitofsky/databricks-sql",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Databricks SQL client for Node.js - Direct REST API without SDK",
   "main": "dist/index.cjs",
   "module": "dist/index.js",
@@ -53,6 +53,7 @@
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "3.958.0",
+    "@aws-sdk/lib-storage": "3.958.0",
     "@aws-sdk/s3-request-presigner": "3.958.0",
     "@types/node": "24.0.2",
     "@types/stream-json": "1.7.8",
