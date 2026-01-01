@@ -433,6 +433,116 @@ describe.skipIf(shouldSkip)('S3 Integration Tests', () => {
       expect(rows[0]).toEqual(['1'])
       expect(rows[1]).toEqual(['2'])
     })
+
+    it.concurrent('maps JSON_OBJECT rows from inline results', async () => {
+      const bigIntValue = 9007199254740993n
+      const result = await executeStatement(
+        `SELECT
+          42 AS num,
+          'hello' AS str,
+          CAST(9007199254740993 AS BIGINT) AS big_int,
+          CAST(12.34 AS DECIMAL(10, 2)) AS price,
+          DATE '2024-01-02' AS d,
+          TIMESTAMP '2024-01-02 03:04:05.123' AS dt,
+          named_struct(
+            'a',
+            1,
+            'b',
+            named_struct('c', 'x')
+          ) AS nested`,
+        auth,
+        { disposition: 'INLINE', format: 'JSON_ARRAY' }
+      )
+
+      expect(result.status.state).toBe('SUCCEEDED')
+
+      const rows = await fetchAll(result, auth, { format: 'JSON_OBJECT' })
+      expect(rows).toEqual([
+        {
+          num: 42,
+          str: 'hello',
+          big_int: bigIntValue,
+          price: 12.34,
+          d: '2024-01-02',
+          dt: '2024-01-02T03:04:05.123Z',
+          nested: {
+            a: 1,
+            b: {
+              c: 'x',
+            },
+          },
+        },
+      ])
+    })
+
+    it.concurrent('maps ARRAY columns with nested STRUCTs from inline results', async () => {
+      const bigIntValue = 9007199254740993n
+      const result = await executeStatement(
+        `SELECT
+          array(1, 2, 3) AS int_array,
+          array('a', 'b') AS string_array,
+          array(
+            named_struct(
+              'id',
+              CAST(9007199254740993 AS BIGINT),
+              'label',
+              'alpha',
+              'created_at',
+              TIMESTAMP '2024-01-02 03:04:05.123',
+              'scores',
+              array(1, 2, 3),
+              'meta',
+              named_struct('flag', true, 'note', 'ok')
+            ),
+            named_struct(
+              'id',
+              CAST(2 AS BIGINT),
+              'label',
+              'beta',
+              'created_at',
+              TIMESTAMP '2024-02-03 04:05:06.789',
+              'scores',
+              array(4, 5),
+              'meta',
+              named_struct('flag', false, 'note', 'ng')
+            )
+          ) AS struct_array`,
+        auth,
+        { disposition: 'INLINE', format: 'JSON_ARRAY' }
+      )
+
+      expect(result.status.state).toBe('SUCCEEDED')
+
+      const rows = await fetchAll(result, auth, { format: 'JSON_OBJECT' })
+      expect(rows).toEqual([
+        {
+          int_array: [1, 2, 3],
+          string_array: ['a', 'b'],
+          struct_array: [
+            {
+              id: bigIntValue,
+              label: 'alpha',
+              created_at: '2024-01-02T03:04:05.123Z',
+              scores: [1, 2, 3],
+              meta: {
+                flag: true,
+                note: 'ok',
+              },
+            },
+            {
+              id: 2n,
+              label: 'beta',
+              created_at: '2024-02-03T04:05:06.789Z',
+              scores: [4, 5],
+              meta: {
+                flag: false,
+                note: 'ng',
+              },
+            },
+          ],
+        },
+      ])
+    })
   })
 
   describe.concurrent('fetchAll with external links', () => {
