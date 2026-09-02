@@ -1,14 +1,30 @@
 import type { Readable } from 'node:stream'
 
-/** Authentication information for Databricks API */
-export type AuthInfo = {
-  /** Databricks Personal Access Token */
-  token: string
+type AuthInfoBase = {
   /** Databricks workspace host (e.g., ...cloud.databricks.com) */
   host: string
   /** SQL warehouse HTTP path (e.g., /sql/1.0/warehouses/abc123) */
   httpPath: string
 }
+
+/** Authentication information using a Databricks Personal Access Token */
+export type PersonalAccessTokenAuthInfo = AuthInfoBase & {
+  token: string
+  clientId?: never
+  clientSecret?: never
+  scopes?: never
+}
+
+/** Authentication information using Databricks OAuth M2M */
+export type OAuthM2MAuthInfo = AuthInfoBase & {
+  token?: never
+  clientId: string
+  clientSecret: string
+  scopes?: string[]
+}
+
+/** Authentication information for Databricks API */
+export type AuthInfo = PersonalAccessTokenAuthInfo | OAuthM2MAuthInfo
 
 /** Statement execution states */
 export type StatementState =
