@@ -16,20 +16,33 @@ import { executeStatement, fetchAll, mergeExternalLinks } from '../src/index.js'
 import type { AuthInfo, MergeExternalLinksResult } from '../src/index.js'
 
 const DATABRICKS_TOKEN = process.env.DATABRICKS_TOKEN
+const DATABRICKS_CLIENT_ID = process.env.DATABRICKS_CLIENT_ID
+const DATABRICKS_CLIENT_SECRET = process.env.DATABRICKS_CLIENT_SECRET
 const DATABRICKS_HOST = process.env.DATABRICKS_HOST
 const DATABRICKS_HTTP_PATH = process.env.DATABRICKS_HTTP_PATH
 const AWS_REGION = process.env.AWS_REGION
 const S3_BUCKET = process.env.DATABRICKS_SQL_S3_BUCKET
 const S3_PREFIX = process.env.DATABRICKS_SQL_S3_PREFIX || ''
 
-const auth: AuthInfo = {
-  token: DATABRICKS_TOKEN || '',
-  host: DATABRICKS_HOST || '',
-  httpPath: DATABRICKS_HTTP_PATH || '',
-}
+const auth: AuthInfo = DATABRICKS_TOKEN
+  ? {
+      token: DATABRICKS_TOKEN,
+      host: DATABRICKS_HOST || '',
+      httpPath: DATABRICKS_HTTP_PATH || '',
+    }
+  : {
+      clientId: DATABRICKS_CLIENT_ID || '',
+      clientSecret: DATABRICKS_CLIENT_SECRET || '',
+      host: DATABRICKS_HOST || '',
+      httpPath: DATABRICKS_HTTP_PATH || '',
+    }
+
+const hasDatabricksAuth = Boolean(
+  DATABRICKS_TOKEN || (DATABRICKS_CLIENT_ID && DATABRICKS_CLIENT_SECRET)
+)
 
 const shouldSkip =
-  !DATABRICKS_TOKEN ||
+  !hasDatabricksAuth ||
   !DATABRICKS_HOST ||
   !DATABRICKS_HTTP_PATH ||
   !AWS_REGION ||

@@ -20,6 +20,7 @@ The goal is simple: stream big results with stable memory usage and without forc
 
 ## Highlights
 - Direct REST calls to Statement Execution API.
+- Personal Access Token and OAuth M2M authentication.
 - Optimized polling with server-side wait (up to 50s) before falling back to client polling.
 - Query metrics support via Query History API (`enableMetrics` option).
 - Efficient external link handling: merge chunks into a single stream.
@@ -47,6 +48,30 @@ const result = await executeStatement('SELECT 1 AS value', auth)
 const rows = await fetchAll(result, auth, { format: 'JSON_OBJECT' })
 console.log(rows) // [{ value: 1 }]
 ```
+
+## Sample (OAuth M2M)
+```ts
+import { executeStatement, fetchAll } from '@bitofsky/databricks-sql'
+
+const auth = {
+  clientId: process.env.DATABRICKS_CLIENT_ID!,
+  clientSecret: process.env.DATABRICKS_CLIENT_SECRET!,
+  host: process.env.DATABRICKS_HOST!,
+  httpPath: process.env.DATABRICKS_HTTP_PATH!,
+}
+
+const result = await executeStatement('SELECT 1 AS value', auth)
+const rows = await fetchAll(result, auth, { format: 'JSON_OBJECT' })
+console.log(rows)
+```
+
+OAuth access tokens are requested from the workspace `/oidc/v1/token` endpoint,
+cached in memory, and renewed five minutes before expiration. A rejected OAuth
+access token (`401`, or `403` with `Invalid access token`) invalidates the cache
+and retries the request once.
+Provide either `token` or both `clientId` and `clientSecret`, but not both modes.
+OAuth requests always include the required `sql` and `query-history` scopes.
+Use `scopes` to request any additional scopes.
 
 ## Sample (Streaming + Presigned URL)
 Stream external links into S3 with gzip compression, then return a single presigned URL.
@@ -178,10 +203,12 @@ try {
 ### AuthInfo
 ```ts
 type AuthInfo = {
-  token: string
   host: string
   httpPath: string
-}
+} & (
+  | { token: string }
+  | { clientId: string; clientSecret: string; scopes?: string[] }
+)
 ```
 
 ### executeStatement(query, auth, options?)

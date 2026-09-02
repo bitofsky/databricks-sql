@@ -1,5 +1,10 @@
 import type { AuthInfo } from './types.js'
 import {
+  getAccessToken,
+  invalidateAccessToken,
+  isOAuthM2MAuthInfo,
+} from './auth.js'
+import {
   HttpError,
   AuthenticationError,
   RateLimitError,
@@ -31,18 +36,20 @@ export async function httpRequest<T>(
 
   let lastError: Error | undefined
   let retryDelay = INITIAL_RETRY_DELAY_MS
+  let oauthRetryAttempted = false
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (signal?.aborted)
       throw new AbortError()
 
     try {
+      const accessToken = await getAccessToken(auth)
       // Build a minimal fetch init, skipping undefined values.
       const fetchInit = Object.fromEntries(
         Object.entries({
           method,
           headers: {
-            Authorization: `Bearer ${auth.token}`,
+            Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
             Accept: 'application/json',
           },
@@ -57,7 +64,27 @@ export async function httpRequest<T>(
       if (response.ok)
         return (await response.json()) as T
 
-      // Authentication error (no retry)
+      const isTokenRejected =
+        response.status === 401 ||
+        (
+          response.status === 403 &&
+          (await response.clone().text().catch(() => '')).includes(
+            'Invalid access token'
+          )
+        )
+
+      if (
+        isTokenRejected &&
+        isOAuthM2MAuthInfo(auth) &&
+        !oauthRetryAttempted &&
+        attempt < MAX_RETRIES
+      ) {
+        invalidateAccessToken(auth)
+        oauthRetryAttempted = true
+        continue
+      }
+
+      // Authentication error
       if (response.status === 401)
         throw new AuthenticationError()
 
@@ -98,6 +125,17 @@ export async function httpRequest<T>(
       throw new HttpError(response.status, response.statusText, errorBody)
 
     } catch (err) {
+      if (
+        err instanceof HttpError &&
+        err.status >= 500 &&
+        attempt < MAX_RETRIES
+      ) {
+        lastError = err
+        await delay(retryDelay, signal)
+        retryDelay *= 2
+        continue
+      }
+
       // Re-throw known errors
       if (
         err instanceof AbortError ||
